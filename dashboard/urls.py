@@ -1,0 +1,33 @@
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('', views.home, name='home'),
+    path('employability/', views.index, name='index'),
+    path('smb/', views.smb_view, name='smb'),
+    path('sahi/', views.sahi_view, name='sahi'),
+    path('sambhav/', views.sambhav_view, name='sambhav'),
+    path('centre/<str:centre_id>/', views.centre_detail, name='centre_detail'),
+    path('api/filter-options/', views.filter_options_api, name='filter_options_api'),
+    path('api/community-colleges/', views.community_colleges_api, name='community_colleges_api'),
+    path('api/community-college-categories/', views.community_college_categories_api, name='community_college_categories_api'),
+    path('api/hyperlocal-jobs/', views.hyperlocal_jobs_api, name='hyperlocal_jobs_api'),
+    path('api/naps/', views.naps_api, name='naps_api'),
+    path('api/smb/cert-filter-options/', views.smb_cert_filter_options_api, name='smb_cert_filter_options_api'),
+    path('api/smb/cert-schedule/',       views.smb_cert_schedule_api,       name='smb_cert_schedule_api'),
+    path('api/cluster/sub-clusters/', views.cluster_sub_clusters_api, name='cluster_sub_clusters_api'),
+    path('api/sub-cluster-map/',      views.sub_cluster_map_api,      name='sub_cluster_map_api'),
+    path('api/sub-cluster-coverage/', views.sub_cluster_coverage_api, name='sub_cluster_coverage_api'),
+    path('api/nav-counts/',           views.nav_counts_api,           name='nav_counts_api'),
+    path('api/home-summary/', views.home_summary_api, name='home_summary_api'),
+    path('api/staffing/demand/', views.staffing_demand_api, name='staffing_demand_api'),
+    path('api/staffing/supply/', views.staffing_supply_api, name='staffing_supply_api'),
+    path('api/staffing/iti/', views.staffing_iti_api, name='staffing_iti_api'),
+    path('api/staffing/sf-colleges/', views.staffing_sf_colleges_api, name='staffing_sf_colleges_api'),
+    path('api/staffing/filter-options/', views.staffing_filter_options_api, name='staffing_filter_options_api'),
+    # ── SAHI module APIs ──
+    path('api/sahi/filter-options/', views.sahi_filter_options_api, name='sahi_filter_options_api'),
+    path('api/sahi/demand-table/',   views.sahi_demand_table_api,   name='sahi_demand_table_api'),
+    path('api/sahi/centre-table/',   views.sahi_centre_table_api,   name='sahi_centre_table_api'),
+    path('api/sahi/diploma-table/',  views.sahi_diploma_table_api,  name='sahi_diploma_table_api'),
+]

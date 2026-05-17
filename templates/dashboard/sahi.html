@@ -1,0 +1,390 @@
+{% extends "dashboard/base.html" %}
+{% block title %}SAHI — MIS Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+    <a href="{% url 'home' %}{% if cluster_filter or sub_cluster_filter %}?cluster={{ cluster_filter }}&sub_cluster={{ sub_cluster_filter }}{% endif %}"
+       style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;color:var(--primary);text-decoration:none;margin-top:4px;white-space:nowrap;">
+      ← Back to Home
+    </a>
+    <div>
+      <div class="page-title">🏫 SAHI</div>
+      <div class="page-subtitle">Demand · Nearby Centres · Diploma Colleges</div>
+    </div>
+  </div>
+</div>
+
+<!-- FILTERS -->
+<div class="card" style="margin-bottom:20px;">
+  <div class="card-body" style="padding:18px 24px;">
+    <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+
+      <div class="filter-group">
+        <label>🗂 Cluster</label>
+        <select id="cluster-select"><option value="">All Clusters</option></select>
+      </div>
+
+      <div class="filter-group" style="min-width:300px;">
+        <label>📍 Sub Cluster</label>
+        <select id="sub-cluster-select"><option value="">All Sub Clusters</option></select>
+      </div>
+
+      <button onclick="clearFilters()"
+        style="padding:8px 16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;color:var(--muted);">
+        ✕ Clear
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- SUB CLUSTER MAP CARD (appears only when sub cluster is selected) -->
+<div id="map-card" class="card" style="margin-bottom:20px;display:none;">
+  <div class="card-body" style="padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <div style="font-size:30px;">🗺</div>
+    <div style="flex:1;min-width:240px;">
+      <div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Sub Cluster Map</div>
+      <div id="map-sc-name" style="font-size:16px;font-weight:700;color:var(--text);margin-top:2px;"></div>
+      <div id="map-sc-meta" style="font-size:12px;color:var(--muted);margin-top:2px;"></div>
+    </div>
+    <a id="map-link" href="#" target="_blank" rel="noopener"
+       style="padding:9px 18px;background:#1a73e8;color:#fff;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;">
+      View on Google Maps →
+    </a>
+  </div>
+</div>
+
+<!-- KPI STRIP -->
+<div class="summary-cards">
+  <div class="summary-card"><div class="label">Clients</div><div class="value" id="kpi-clients">—</div></div>
+  <div class="summary-card enrol"><div class="label">Total HC</div><div class="value" id="kpi-hc">—</div></div>
+  <div class="summary-card cert"><div class="label">Monthly Demand</div><div class="value" id="kpi-monthly">—</div></div>
+</div>
+
+<!-- TABLE 1 — DEMAND BY EXISTING CLIENT -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">🏢 Existing Client × Designation — HC &amp; Monthly Demand</div>
+    <div style="font-size:12px;color:var(--muted);" id="t1-meta"></div>
+  </div>
+  <div class="table-wrap" style="max-height:480px;overflow-y:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Existing Client</th><th>Client Nature</th>
+          <th>Designation</th>
+          <th class="num">HC</th><th class="num">Monthly Demand</th>
+        </tr>
+      </thead>
+      <tbody id="t1-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- TABLE 2 — NEARBY CENTRES -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">🏫 Nearby Centres — Plan (from BatchPlan)</div>
+    <div style="font-size:12px;color:var(--muted);" id="t2-meta"></div>
+  </div>
+  <div id="t2-info" style="padding:12px 20px;font-size:13px;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);"></div>
+  <div class="table-wrap" style="max-height:480px;overflow-y:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Centre</th>
+          <th>Centre ID</th>
+          <th>QP</th>
+          <th class="num">Final Enrolment Planned</th>
+          <th class="num">Final Certification Planned</th>
+          <th class="num">Final Placement Planned</th>
+        </tr>
+      </thead>
+      <tbody id="t2-body"></tbody>
+      <tfoot id="t2-foot"></tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- TABLE 3 — DIPLOMA COLLEGES & INSTITUTES & TRAINING CENTRES -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">🎓 Diploma Colleges &amp; Institutes &amp; Training Centres</div>
+    <div style="font-size:12px;color:var(--muted);" id="t3-meta"></div>
+  </div>
+  <div id="t3-info" style="padding:12px 20px;font-size:13px;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);"></div>
+  <div class="table-wrap" style="max-height:480px;overflow-y:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Name / Place</th>
+          <th>Address</th>
+          <th>Phone / Hours</th>
+          <th>Centre</th>
+        </tr>
+      </thead>
+      <tbody id="t3-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+.filter-group { display:flex; flex-direction:column; gap:5px; min-width:240px; }
+.filter-group label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; }
+.filter-group select { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; background:var(--card); color:var(--text); min-width:240px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+table thead th { background:#f8fafc; padding:10px 14px; text-align:left; font-weight:700; color:var(--primary); border-bottom:2px solid var(--border); position:sticky; top:0; z-index:1; }
+table thead th.num, table tbody td.num, table tfoot td.num { text-align:right; font-variant-numeric:tabular-nums; }
+table tbody td { padding:9px 14px; border-bottom:1px solid var(--border); color:var(--text); }
+table tbody tr:hover { background:#f9fafb; }
+table tfoot td { padding:11px 14px; background:#f1f5f9; font-weight:700; color:var(--primary); border-top:2px solid var(--border); }
+.empty { text-align:center; padding:30px; color:var(--muted); font-style:italic; }
+#map-link:hover { background:#1557b0; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const PRESET = {
+  cluster:     "{{ cluster_filter|escapejs }}",
+  sub_cluster: "{{ sub_cluster_filter|escapejs }}",
+};
+
+function fmt(n) { return (n === null || n === undefined) ? '—' : Number(n).toLocaleString('en-IN'); }
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function setSelectOptions(id, values, selected, placeholder) {
+  const sel = document.getElementById(id);
+  const cur = selected !== undefined ? selected : sel.value;
+  sel.innerHTML = `<option value="">${placeholder || 'All'}</option>`;
+  values.forEach(v => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    if (v === cur) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function buildParams() {
+  const p = new URLSearchParams();
+  // Read from dropdowns first; fall back to PRESET (the ?cluster=… / ?sub_cluster=…
+  // values forwarded from Home) so that the initial table/KPI load respects them
+  // even before the dropdowns have been populated asynchronously.
+  const clSel = document.getElementById('cluster-select');
+  const scSel = document.getElementById('sub-cluster-select');
+  // "dropdown not yet populated" = only the placeholder option exists
+  const c  = clSel.value || (clSel.options.length <= 1 ? PRESET.cluster : '');
+  const sc = scSel.value || (scSel.options.length <= 1 ? PRESET.sub_cluster : '');
+  if (c)  p.set('cluster', c);
+  if (sc) p.set('sub_cluster', sc);
+  return p;
+}
+
+function reloadFilterOptions(preserveSc) {
+  // Use the cascading API to get clusters + sub-clusters given current cluster filter.
+  // On the very first call the dropdown isn't populated yet, so fall back to PRESET.cluster
+  // (which is the ?cluster=… query-string value sent by Home / Back-to-Home navigation).
+  const params = buildParams();
+  if (!params.get('cluster') && PRESET.cluster) {
+    params.set('cluster', PRESET.cluster);
+  }
+  fetch('/api/sahi/filter-options/?' + params.toString())
+    .then(r => r.json())
+    .then(data => {
+      // Cluster dropdown — only set on first load (full list)
+      const clSel = document.getElementById('cluster-select');
+      if (clSel.options.length <= 1) {
+        setSelectOptions('cluster-select', data.clusters, PRESET.cluster, 'All Clusters');
+      }
+      // Sub Cluster dropdown — narrows by cluster
+      const want = preserveSc !== undefined ? preserveSc :
+                   (document.getElementById('sub-cluster-select').value || PRESET.sub_cluster);
+      setSelectOptions('sub-cluster-select', data.sub_clusters, want, 'All Sub Clusters');
+    });
+}
+
+function refreshMapCard() {
+  const sc   = document.getElementById('sub-cluster-select').value;
+  const card = document.getElementById('map-card');
+  if (!sc) {
+    card.style.display = 'none';
+    return;
+  }
+  fetch('/api/sub-cluster-map/?sub_cluster=' + encodeURIComponent(sc))
+    .then(r => r.json())
+    .then(d => {
+      if (!d.map_url) {
+        card.style.display = 'none';
+        return;
+      }
+      document.getElementById('map-sc-name').textContent = sc;
+      document.getElementById('map-sc-meta').textContent =
+        [d.cluster, d.state, d.sub_cluster_id].filter(Boolean).join(' · ');
+      document.getElementById('map-link').href = d.map_url;
+      card.style.display = '';
+    });
+}
+
+function loadDemandTable() {
+  fetch('/api/sahi/demand-table/?' + buildParams().toString())
+    .then(r => r.json())
+    .then(data => {
+      const tb = document.getElementById('t1-body');
+      tb.innerHTML = '';
+      if (!data.rows.length) {
+        tb.innerHTML = '<tr><td colspan="5" class="empty">No demand rows match the current filters.</td></tr>';
+      } else {
+        data.rows.forEach(r => {
+          tb.insertAdjacentHTML('beforeend',
+            `<tr>
+              <td>${esc(r.existing_client)}</td>
+              <td>${esc(r.client_nature)}</td>
+              <td>${esc(r.designation)}</td>
+              <td class="num">${fmt(r.hc)}</td>
+              <td class="num">${fmt(r.monthly_demand)}</td>
+            </tr>`);
+        });
+      }
+      const t = data.totals;
+      document.getElementById('kpi-clients').textContent = fmt(t.clients);
+      document.getElementById('kpi-hc').textContent      = fmt(t.total_hc);
+      document.getElementById('kpi-monthly').textContent = fmt(t.monthly_demand);
+      document.getElementById('t1-meta').textContent =
+        `${t.rows.toLocaleString('en-IN')} rows · ${t.clients.toLocaleString('en-IN')} clients`;
+    });
+}
+
+function loadCentreTable() {
+  const cluster    = document.getElementById('cluster-select').value;
+  const subCluster = document.getElementById('sub-cluster-select').value;
+
+  const t2body = document.getElementById('t2-body');
+  const t2foot = document.getElementById('t2-foot');
+  const info   = document.getElementById('t2-info');
+  const meta   = document.getElementById('t2-meta');
+
+  t2body.innerHTML = ''; t2foot.innerHTML = ''; meta.textContent = '';
+
+  if (!cluster && !subCluster) {
+    info.innerHTML = '👉 Select a <b>Cluster</b> (or Sub Cluster) to see nearby centres.';
+    return;
+  }
+
+  fetch('/api/sahi/centre-table/?' + buildParams().toString())
+    .then(r => r.json())
+    .then(data => {
+      if (!data.mapped) {
+        info.innerHTML = `⚠️ ${esc(data.message)}`;
+        t2body.innerHTML = '<tr><td colspan="6" class="empty">No data.</td></tr>';
+        return;
+      }
+      info.innerHTML = `Scope: <b>${esc(data.scope)}</b>`;
+      if (!data.rows.length) {
+        t2body.innerHTML = '<tr><td colspan="6" class="empty">No centres / batches found.</td></tr>';
+        return;
+      }
+      data.rows.forEach(r => {
+        t2body.insertAdjacentHTML('beforeend',
+          `<tr>
+            <td>${esc(r.centre_name)}</td>
+            <td style="font-family:monospace;font-size:12px;">${esc(r.centre_id)}</td>
+            <td>${esc(r.qp || '—')}</td>
+            <td class="num">${fmt(r.enrol)}</td>
+            <td class="num">${fmt(r.cert)}</td>
+            <td class="num">${fmt(r.place)}</td>
+          </tr>`);
+      });
+      const t = data.totals;
+      t2foot.innerHTML =
+        `<tr>
+           <td colspan="2">Total — ${t.centres} centre(s), ${t.qps} QP(s)</td>
+           <td></td>
+           <td class="num">${fmt(t.enrol)}</td>
+           <td class="num">${fmt(t.cert)}</td>
+           <td class="num">${fmt(t.place)}</td>
+         </tr>`;
+      meta.textContent = `${t.centres} centres · ${t.qps} QPs`;
+    });
+}
+
+function loadDiplomaTable() {
+  const cluster    = document.getElementById('cluster-select').value;
+  const subCluster = document.getElementById('sub-cluster-select').value;
+
+  const tbody = document.getElementById('t3-body');
+  const info  = document.getElementById('t3-info');
+  const meta  = document.getElementById('t3-meta');
+
+  tbody.innerHTML = ''; meta.textContent = '';
+
+  if (!cluster && !subCluster) {
+    info.innerHTML = '👉 Select a <b>Cluster</b> (or Sub Cluster) to see nearby diploma colleges &amp; institutes.';
+    return;
+  }
+
+  fetch('/api/sahi/diploma-table/?' + buildParams().toString())
+    .then(r => r.json())
+    .then(data => {
+      if (!data.mapped) {
+        info.innerHTML = `⚠️ ${esc(data.message)}`;
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">No data.</td></tr>';
+        return;
+      }
+      info.innerHTML = `Scope: <b>${esc(data.scope)}</b>`;
+      if (!data.rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">No diploma colleges / institutes found near these centres.</td></tr>';
+        return;
+      }
+      data.rows.forEach(r => {
+        tbody.insertAdjacentHTML('beforeend',
+          `<tr>
+            <td>${esc(r.category)}</td>
+            <td>${esc(r.name_place)}</td>
+            <td style="font-size:12px;color:var(--muted);">${esc(r.address)}</td>
+            <td style="font-size:12px;">${esc(r.phone_hours)}</td>
+            <td style="font-size:12px;">${esc(r.centre_name)}</td>
+          </tr>`);
+      });
+      const t = data.totals;
+      meta.textContent = `${t.rows} rows · ${t.diploma} diploma · ${t.institutes} institutes · ${t.centres} centres`;
+    });
+}
+
+function refresh() {
+  reloadFilterOptions();
+  loadDemandTable();
+  loadCentreTable();
+  loadDiplomaTable();
+  refreshMapCard();
+}
+
+function clearFilters() {
+  document.getElementById('cluster-select').value = '';
+  document.getElementById('sub-cluster-select').value = '';
+  refresh();
+}
+
+// Cascading: changing cluster resets sub-cluster
+document.getElementById('cluster-select').addEventListener('change', () => {
+  document.getElementById('sub-cluster-select').value = '';
+  reloadFilterOptions('');
+  loadDemandTable();
+  loadCentreTable();
+  loadDiplomaTable();
+  refreshMapCard();
+});
+document.getElementById('sub-cluster-select').addEventListener('change', () => {
+  loadDemandTable();
+  loadCentreTable();
+  loadDiplomaTable();
+  refreshMapCard();
+});
+
+// Bootstrap
+refresh();
+</script>
+{% endblock %}

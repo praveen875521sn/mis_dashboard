@@ -1,0 +1,137 @@
+{# ════════════════════════════════════════════════════════════════════════════
+   TRAINER & MOBILIZER STATUS — TARGET-BASED (Trainer_Target / Mobilsier_Target)
+   - Trainer Status: row per Trainer in Manpower; day-wise hours (auto-month).
+     Trainer not in Trainer_Target → Idle (Target not assigned).
+   - Mobilizer Status: row per Mobilizer in Manpower; E Target / E Act / %.
+     Mobilizer not in Mobilsier_Target → Idle (Target not assigned).
+   ════════════════════════════════════════════════════════════════════════════ #}
+
+<style>
+.ss-block { margin-bottom: 22px; }
+.ss-summary { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.ss-chip { padding:4px 14px; border-radius:20px; font-size:13px; font-weight:600; }
+.ss-chip.active { background:rgba(34,197,94,.13);  color:#065f46; border:1px solid rgba(34,197,94,.3); }
+.ss-chip.idle   { background:rgba(245,158,11,.15); color:#92400e; border:1px solid rgba(245,158,11,.4); }
+
+.ss-badge { display:inline-block; padding:2px 10px; border-radius:12px; font-size:11px; font-weight:700; white-space:nowrap; }
+.ss-badge.occupied { background:rgba(34,197,94,.18);  color:#065f46; }
+.ss-badge.idle     { background:rgba(245,158,11,.22); color:#92400e; }
+
+.trainer-tbl,
+.mobilizer-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+.trainer-tbl th, .trainer-tbl td,
+.mobilizer-tbl th, .mobilizer-tbl td { padding:8px 10px; border-bottom:1px solid var(--border); }
+.trainer-tbl thead th, .mobilizer-tbl thead th { background:#f8fafc; color:var(--primary); font-weight:700; text-align:left; position:sticky; top:0; z-index:1; }
+.trainer-tbl td.num, .mobilizer-tbl td.num,
+.trainer-tbl th.num, .mobilizer-tbl th.num { text-align:right; font-variant-numeric:tabular-nums; }
+.trainer-tbl tbody tr:hover, .mobilizer-tbl tbody tr:hover { background:#f9fafb; }
+.trainer-tbl tr.row-idle, .mobilizer-tbl tr.row-idle { background:#fffbeb; }
+
+.day-h { font-size:11px; text-align:center; min-width:30px; padding:6px 4px !important; }
+.day-c { text-align:center; font-variant-numeric:tabular-nums; padding:6px 4px !important; font-size:12px; }
+.day-c.zero { color:#cbd5e1; }
+.day-c.has  { font-weight:600; color:#0f5132; }
+
+.trainer-wrap { overflow-x:auto; max-height:520px; }
+.mobilizer-wrap { max-height:520px; overflow-y:auto; }
+</style>
+
+{# ── TRAINER STATUS ──────────────────────────────────────────────────────── #}
+<div class="ss-block card">
+  <div class="card-header">
+    <div class="card-title">🎓 Trainer Status</div>
+    <div style="font-size:12px;color:var(--muted);">
+      Day-wise hours{% if staff_status.trainer_month %} — {{ staff_status.trainer_month }}{% endif %}
+    </div>
+  </div>
+  <div class="card-body" style="padding:16px 20px;">
+    <div class="ss-summary">
+      <span class="ss-chip active">Active: {{ staff_status.trainer_active }}</span>
+      <span class="ss-chip idle">Idle (Target not assigned): {{ staff_status.trainer_idle }}</span>
+    </div>
+
+    <div class="trainer-wrap">
+      <table class="trainer-tbl">
+        <thead>
+          <tr>
+            <th>Ecode</th>
+            <th>Trainer</th>
+            <th>Centre</th>
+            <th>Status</th>
+            {% for d in staff_status.trainer_dates %}
+              <th class="day-h">{{ d }}</th>
+            {% endfor %}
+            <th class="num">Total</th>
+            <th class="num">Days</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in staff_status.trainer_rows %}
+          <tr class="{% if not r.in_target %}row-idle{% endif %}">
+            <td>{{ r.eid }}</td>
+            <td>{{ r.name }}</td>
+            <td style="font-size:12px;">{{ r.centre }}</td>
+            <td><span class="ss-badge {{ r.status_class }}">{{ r.status }}</span></td>
+            {% for h in r.day_hours %}
+              <td class="day-c {% if h %}has{% else %}zero{% endif %}">{% if h %}{{ h|floatformat:"-1" }}{% else %}·{% endif %}</td>
+            {% endfor %}
+            <td class="num">{{ r.total_hours|floatformat:"-1" }}</td>
+            <td class="num">{{ r.days_worked }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="100%" style="text-align:center;padding:20px;color:var(--muted);">No trainers in this scope.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{# ── MOBILIZER STATUS ────────────────────────────────────────────────────── #}
+<div class="ss-block card">
+  <div class="card-header">
+    <div class="card-title">📣 Mobilizer Status</div>
+    <div style="font-size:12px;color:var(--muted);">
+      {% if staff_status.mobilizer_month %}{{ staff_status.mobilizer_month }} target vs actual{% endif %}
+    </div>
+  </div>
+  <div class="card-body" style="padding:16px 20px;">
+    <div class="ss-summary">
+      <span class="ss-chip active">Active: {{ staff_status.mobilizer_active }}</span>
+      <span class="ss-chip idle">Idle (Target not assigned): {{ staff_status.mobilizer_idle }}</span>
+    </div>
+
+    <div class="mobilizer-wrap">
+      <table class="mobilizer-tbl">
+        <thead>
+          <tr>
+            <th>Ecode</th>
+            <th>Mobilizer</th>
+            <th>Centre</th>
+            <th>Status</th>
+            <th class="num">E Target</th>
+            <th class="num">E Actual</th>
+            <th class="num">% Achieved</th>
+            <th class="num">Batches</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in staff_status.mobilizer_rows %}
+          <tr class="{% if not r.in_target %}row-idle{% endif %}">
+            <td>{{ r.eid }}</td>
+            <td>{{ r.name }}</td>
+            <td style="font-size:12px;">{{ r.centre }}</td>
+            <td><span class="ss-badge {{ r.status_class }}">{{ r.status }}</span></td>
+            <td class="num">{{ r.e_target }}</td>
+            <td class="num">{{ r.e_act }}</td>
+            <td class="num">{% if r.in_target %}{{ r.pct }}%{% else %}—{% endif %}</td>
+            <td class="num">{{ r.batches }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);">No mobilizers in this scope.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

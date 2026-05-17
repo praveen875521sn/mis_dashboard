@@ -1,0 +1,364 @@
+{% extends "dashboard/base.html" %}
+{% block title %}MIS Dashboard — Home{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">📊 MIS Dashboard</div>
+    <div class="page-subtitle">Select filters to scope the modules below</div>
+  </div>
+</div>
+
+<!-- FILTER BAR -->
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-body" style="padding:18px 24px;">
+    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+
+      <div class="filter-group">
+        <label>🗂 Cluster Filter</label>
+        <select id="cluster-select">
+          <option value="">All Clusters</option>
+          {% for c in clusters %}
+            <option value="{{ c }}" {% if c == cluster_filter %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label>📍 Sub Cluster Filter</label>
+        <select id="sub-cluster-select">
+          <option value="">All Sub Clusters</option>
+          {% for sc in sub_clusters %}
+            <option value="{{ sc }}" {% if sc == sub_cluster_filter %}selected{% endif %}>{{ sc }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button onclick="clearFilters()"
+        style="padding:8px 16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;color:var(--muted);margin-bottom:1px;">
+        ✕ Clear
+      </button>
+
+    </div>
+  </div>
+</div>
+
+<!-- SUB CLUSTER MAP CARD (appears only when a sub cluster is selected) -->
+<div id="map-card" class="card" style="margin-bottom:24px;display:none;">
+  <div class="card-body" style="padding:18px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    <div style="font-size:36px;">🗺</div>
+    <div style="flex:1;min-width:240px;">
+      <div style="font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Sub Cluster Map</div>
+      <div id="map-sc-name" style="font-size:17px;font-weight:700;color:var(--text);margin-top:4px;"></div>
+      <div id="map-sc-meta" style="font-size:12px;color:var(--muted);margin-top:3px;"></div>
+    </div>
+    <a id="map-link" href="#" target="_blank" rel="noopener"
+       style="padding:10px 20px;background:#1a73e8;color:#fff;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;white-space:nowrap;display:inline-flex;align-items:center;gap:8px;">
+      View on Google Maps →
+    </a>
+  </div>
+</div>
+
+<!-- NAVIGATION CARDS -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;">
+
+  <!-- EMPLOYABILITY -->
+  <div class="nav-page-card" onclick="navigateTo('employability')">
+    <div class="nav-card-banner" style="background:linear-gradient(135deg,#1a3c6e,#2563ab);">
+      <span style="font-size:32px;">📊</span>
+      <span class="nav-card-title">Employability</span>
+    </div>
+    <div class="nav-card-body">
+      <div class="nav-card-desc">Centre-wise enrolment, certification &amp; placement — targets vs actuals.</div>
+      <div class="summary-grid">
+        <div class="summary-stat"><div class="summary-val" id="emp-centres">…</div><div class="summary-lbl">Centres</div></div>
+        <div class="summary-stat"><div class="summary-val" id="emp-enrol">…</div><div class="summary-lbl">Enrol Target</div></div>
+        <div class="summary-stat"><div class="summary-val" id="emp-cert">…</div><div class="summary-lbl">Cert Target</div></div>
+        <div class="summary-stat"><div class="summary-val" id="emp-place">…</div><div class="summary-lbl">Place Target</div></div>
+      </div>
+      <div class="nav-card-arrow">Go to Employability →</div>
+    </div>
+  </div>
+
+  <!-- SMB -->
+  <div class="nav-page-card" onclick="navigateTo('smb')">
+    <div class="nav-card-banner" style="background:linear-gradient(135deg,#0f5132,#198754);">
+      <span style="font-size:32px;">🏭</span>
+      <span class="nav-card-title">SMB</span>
+    </div>
+    <div class="nav-card-body">
+      <div class="nav-card-desc">NAPS eligible QP details &amp; hyperlocal employer outreach near centres.</div>
+      <div class="summary-grid">
+        <div class="summary-stat"><div class="summary-val" id="smb-qp">…</div><div class="summary-lbl">Total QPs</div></div>
+        <div class="summary-stat"><div class="summary-val" id="smb-naps">…</div><div class="summary-lbl">NAPS Eligible</div></div>
+        <div class="summary-stat" style="grid-column:span 2;"><div class="summary-val" id="smb-hj">…</div><div class="summary-lbl">Hyperlocal Employers</div></div>
+      </div>
+      <div class="nav-card-arrow">Go to SMB →</div>
+    </div>
+  </div>
+
+  <!-- SAHI -->
+  <div class="nav-page-card" onclick="navigateTo('sahi')">
+    <div class="nav-card-banner" style="background:linear-gradient(135deg,#6f42c1,#9b59b6);">
+      <span style="font-size:32px;">🏫</span>
+      <span class="nav-card-title">SAHI</span>
+    </div>
+    <div class="nav-card-body">
+      <div class="nav-card-desc">Demand &amp; supply mapping — clients × designations × nearby centres.</div>
+      <div class="summary-grid">
+        <div class="summary-stat"><div class="summary-val" id="sahi-clients">…</div><div class="summary-lbl">Clients</div></div>
+        <div class="summary-stat"><div class="summary-val" id="sahi-centres">…</div><div class="summary-lbl">SAHI Centres</div></div>
+        <div class="summary-stat"><div class="summary-val" id="sahi-hc">…</div><div class="summary-lbl">Total HC</div></div>
+        <div class="summary-stat"><div class="summary-val" id="sahi-monthly">…</div><div class="summary-lbl">Monthly Demand</div></div>
+      </div>
+      <div class="nav-card-arrow">Go to SAHI →</div>
+    </div>
+  </div>
+
+  <!-- SAMBHAV COMMUNITY -->
+  <div class="nav-page-card" onclick="navigateTo('sambhav')">
+    <div class="nav-card-banner" style="background:linear-gradient(135deg,#b45309,#f59e0b);">
+      <span style="font-size:32px;">🤝</span>
+      <span class="nav-card-title">Sambhav Community</span>
+    </div>
+    <div class="nav-card-body">
+      <div class="nav-card-desc">Community projects — solar, kitchen, health camps, school infrastructure.</div>
+      <div class="summary-grid">
+        <div class="summary-stat" style="grid-column:span 2;"><div class="summary-val" id="sc-projects">…</div><div class="summary-lbl">Projects</div></div>
+        <div class="summary-stat" style="grid-column:span 2;"><div class="summary-val" id="sc-locations">…</div><div class="summary-lbl">Locations</div></div>
+      </div>
+      <div class="nav-card-arrow">Go to Sambhav Community →</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- COVERAGE TABLE (only when a Cluster is selected) -->
+<div id="coverage-card" class="card" style="margin-top:24px;display:none;">
+  <div class="card-header">
+    <div class="card-title">📋 Sub Cluster Data Coverage — <span id="cov-cluster"></span></div>
+    <div style="font-size:12px;color:var(--muted);" id="cov-meta"></div>
+  </div>
+  <div class="table-wrap" style="max-height:520px;overflow-y:auto;">
+    <table class="cov-tbl">
+      <thead>
+        <tr>
+          <th>Sub Cluster</th>
+          <th style="text-align:center;">📊 Employability</th>
+          <th style="text-align:center;">🏭 SMB</th>
+          <th style="text-align:center;">🏫 SAHI</th>
+          <th style="text-align:center;">🤝 Sambhav Community</th>
+        </tr>
+      </thead>
+      <tbody id="cov-body"></tbody>
+      <tfoot id="cov-foot"></tfoot>
+    </table>
+  </div>
+</div>
+
+<style>
+.filter-group { display:flex; flex-direction:column; gap:5px; min-width:240px; }
+.filter-group label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; }
+.filter-group select { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; background:var(--card); color:var(--text); }
+
+.nav-page-card {
+  background:var(--card); border-radius:14px; box-shadow:0 2px 8px rgba(0,0,0,0.08);
+  overflow:hidden; border:1px solid var(--border); cursor:pointer;
+  display:flex; flex-direction:column;
+  transition:transform .18s, box-shadow .18s;
+}
+.nav-page-card:hover { transform:translateY(-4px); box-shadow:0 8px 24px rgba(0,0,0,0.13); }
+.nav-card-banner { display:flex; align-items:center; gap:14px; padding:22px 24px; color:#fff; }
+.nav-card-title  { font-size:22px; font-weight:700; }
+.nav-card-body   { padding:18px 24px 22px; display:flex; flex-direction:column; flex:1; }
+.nav-card-desc   { font-size:13px; color:var(--muted); line-height:1.6; }
+.nav-card-arrow  { margin-top:auto; padding-top:16px; font-size:13px; font-weight:600; color:#3b82f6; }
+.summary-grid    { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+.summary-stat    { background:var(--bg); border-radius:10px; padding:12px 10px; text-align:center; }
+.summary-val     { font-size:22px; font-weight:700; color:var(--primary); line-height:1.1; }
+.summary-lbl     { font-size:11px; color:var(--muted); margin-top:4px; text-transform:uppercase; letter-spacing:.4px; }
+
+#map-link:hover { background:#1557b0; }
+
+/* Coverage table */
+.cov-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+.cov-tbl thead th { background:#f8fafc; padding:11px 14px; text-align:left; font-weight:700; color:var(--primary); border-bottom:2px solid var(--border); position:sticky; top:0; z-index:1; }
+.cov-tbl tbody td { padding:10px 14px; border-bottom:1px solid var(--border); color:var(--text); }
+.cov-tbl tbody tr:hover { background:#f9fafb; }
+.cov-tbl tfoot td { padding:11px 14px; background:#f1f5f9; font-weight:700; color:var(--primary); border-top:2px solid var(--border); }
+.cov-mark { font-size:18px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:50%; }
+.cov-mark.yes { background:rgba(34,197,94,.18);  color:#065f46; }
+.cov-mark.no  { background:rgba(248,113,113,.18); color:#991b1b; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function fmt(n) { return (n === null || n === undefined) ? '—' : n.toLocaleString('en-IN'); }
+
+function buildParams() {
+  const p = new URLSearchParams();
+  const c   = document.getElementById('cluster-select').value;
+  const sc  = document.getElementById('sub-cluster-select').value;
+  if (c)   p.set('cluster', c);
+  if (sc)  p.set('sub_cluster', sc);
+  return p;
+}
+
+function loadSummary() {
+  fetch('/api/home-summary/?' + buildParams().toString())
+    .then(r => r.json())
+    .then(data => {
+      const e = data.employability;
+      document.getElementById('emp-centres').textContent = fmt(e.centre_count);
+      document.getElementById('emp-enrol').textContent   = fmt(e.enrol_target);
+      document.getElementById('emp-cert').textContent    = fmt(e.cert_target);
+      document.getElementById('emp-place').textContent   = fmt(e.place_target);
+      const s = data.smb;
+      document.getElementById('smb-qp').textContent   = fmt(s.qp_count);
+      document.getElementById('smb-naps').textContent = fmt(s.naps_eligible_count);
+      document.getElementById('smb-hj').textContent   = fmt(s.hj_count);
+      const h = data.sahi;
+      document.getElementById('sahi-clients').textContent = fmt(h.clients);
+      document.getElementById('sahi-centres').textContent = fmt(h.centre_count);
+      document.getElementById('sahi-hc').textContent      = fmt(h.total_hc);
+      document.getElementById('sahi-monthly').textContent = fmt(h.monthly_demand);
+      const sc = data.sambhav || {};
+      document.getElementById('sc-projects').textContent  = fmt(sc.projects);
+      document.getElementById('sc-locations').textContent = fmt(sc.locations);
+    });
+}
+
+// ─── Coverage table (only renders when a Cluster is selected) ────────────────
+function refreshCoverageTable() {
+  const cluster = document.getElementById('cluster-select').value;
+  const card    = document.getElementById('coverage-card');
+  if (!cluster) {
+    card.style.display = 'none';
+    return;
+  }
+  fetch('/api/sub-cluster-coverage/?cluster=' + encodeURIComponent(cluster))
+    .then(r => r.json())
+    .then(d => {
+      if (!d.show || !d.rows.length) {
+        card.style.display = 'none';
+        return;
+      }
+      card.style.display = '';
+      document.getElementById('cov-cluster').textContent = d.cluster;
+      const tb = document.getElementById('cov-body');
+      tb.innerHTML = '';
+      const mk = ok => `<td style="text-align:center;"><span class="cov-mark ${ok?'yes':'no'}">${ok?'✓':'✕'}</span></td>`;
+      d.rows.forEach(r => {
+        tb.insertAdjacentHTML('beforeend',
+          `<tr>
+            <td>${r.sub_cluster.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</td>
+            ${mk(r.employability)}${mk(r.smb)}${mk(r.sahi)}${mk(r.sambhav)}
+          </tr>`);
+      });
+      const t = d.totals;
+      document.getElementById('cov-foot').innerHTML =
+        `<tr>
+           <td>Total — ${t.rows} sub cluster${t.rows===1?'':'s'}</td>
+           <td style="text-align:center;">${t.employability}</td>
+           <td style="text-align:center;">${t.smb}</td>
+           <td style="text-align:center;">${t.sahi}</td>
+           <td style="text-align:center;">${t.sambhav}</td>
+         </tr>`;
+      document.getElementById('cov-meta').textContent = `${t.rows} sub cluster${t.rows===1?'':'s'}`;
+    });
+}
+
+// ─── Map card visibility & content ──────────────────────────────────────────
+function refreshMapCard() {
+  const sc   = document.getElementById('sub-cluster-select').value;
+  const card = document.getElementById('map-card');
+  if (!sc) {
+    card.style.display = 'none';
+    return;
+  }
+  fetch('/api/sub-cluster-map/?sub_cluster=' + encodeURIComponent(sc))
+    .then(r => r.json())
+    .then(d => {
+      if (!d.map_url) {
+        card.style.display = 'none';
+        return;
+      }
+      document.getElementById('map-sc-name').textContent = sc;
+      const meta = [d.cluster, d.state, d.sub_cluster_id]
+                    .filter(Boolean).join(' · ');
+      document.getElementById('map-sc-meta').textContent = meta;
+      document.getElementById('map-link').href = d.map_url;
+      card.style.display = '';
+    });
+}
+
+function navigateTo(page) {
+  const params = buildParams().toString();
+  const routes = { employability: '/employability/', smb: '/smb/', sahi: '/sahi/', sambhav: '/sambhav/' };
+  window.location.href = routes[page] + (params ? '?' + params : '');
+}
+
+function clearFilters() {
+  document.getElementById('cluster-select').value      = '';
+  document.getElementById('sub-cluster-select').innerHTML = '<option value="">All Sub Clusters</option>';
+  // Repopulate sub-cluster dropdown with full list
+  reloadSubClusters('');
+  loadSummary();
+  refreshMapCard();
+  refreshNavCounts();
+  refreshCoverageTable();
+}
+
+// Reload sub-cluster dropdown based on selected cluster
+function reloadSubClusters(preserveValue) {
+  const cluster = document.getElementById('cluster-select').value;
+  const sel     = document.getElementById('sub-cluster-select');
+  const want    = preserveValue ?? sel.value;
+  fetch('/api/cluster/sub-clusters/?cluster=' + encodeURIComponent(cluster))
+    .then(r => r.json())
+    .then(d => {
+      sel.innerHTML = '<option value="">All Sub Clusters</option>';
+      d.sub_clusters.forEach(s => {
+        const o = document.createElement('option');
+        o.value = s; o.textContent = s;
+        if (s === want) o.selected = true;
+        sel.appendChild(o);
+      });
+    });
+}
+
+function refreshNavCounts() {
+  const cluster = document.getElementById('cluster-select').value;
+  const q = cluster ? '?cluster=' + encodeURIComponent(cluster) : '';
+  fetch('/api/nav-counts/' + q)
+    .then(r => r.json())
+    .then(d => {
+      const a = document.getElementById('navCountCluster');
+      const b = document.getElementById('navCountSubCluster');
+      if (a) a.textContent = d.cluster_count;
+      if (b) b.textContent = d.sub_cluster_count;
+    });
+}
+
+document.getElementById('cluster-select').addEventListener('change', function() {
+  // Cluster change → narrow sub-cluster dropdown, reset its value
+  const sel = document.getElementById('sub-cluster-select');
+  sel.value = '';
+  reloadSubClusters('');
+  loadSummary();
+  refreshMapCard();
+  refreshNavCounts();
+  refreshCoverageTable();
+});
+
+document.getElementById('sub-cluster-select').addEventListener('change', () => {
+  loadSummary();
+  refreshMapCard();
+});
+
+loadSummary();
+refreshMapCard();
+refreshCoverageTable();
+</script>
+{% endblock %}

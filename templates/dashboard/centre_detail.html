@@ -1,0 +1,405 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ centre.centre_name }} — MIS Dashboard{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="{% url 'index' %}?fy={{ fy }}{% if project_name %}&project={{ project_name }}{% endif %}">🏠 Overview</a>
+  <span class="sep">›</span>
+  <span>{{ centre.centre_name }}</span>
+</div>
+
+<div class="page-header">
+  <div>
+    <div class="page-title">🏢 {{ centre.centre_name }}</div>
+    <div class="page-subtitle">
+      Centre ID: {{ centre.centre_id }}
+      {% if centre.bu_head %}&nbsp;|&nbsp; <strong>BU Head:</strong> {{ centre.bu_head }}{% endif %}
+      {% if centre.pmt_lead %}&nbsp;|&nbsp; <strong>PMT:</strong> {{ centre.pmt_lead }}{% endif %}
+      {% if centre.tm_name %}&nbsp;|&nbsp; <strong>TM:</strong> {{ centre.tm_name }}{% endif %}
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <div class="fy-selector">
+      <label>FY:</label>
+      <select id="fy-select">
+        {% for f in available_fys %}
+          <option value="{{ f }}" {% if f == fy %}selected{% endif %}>FY {{ f }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <a href="{% url 'index' %}?fy={{ fy }}{% if project_name %}&project={{ project_name }}{% endif %}" class="btn-back">← Back</a>
+  </div>
+</div>
+
+<!-- Project filter for this centre -->
+<form method="get" class="filter-bar" style="margin-bottom:20px;">
+  <input type="hidden" name="fy" value="{{ fy }}">
+  <div class="filter-group">
+    <label>🏗️ Project</label>
+    <select name="project">
+      <option value="">All Projects</option>
+      {% for p in projects %}
+        <option value="{{ p }}" {% if p == project_name %}selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn-filter">Apply</button>
+  <a href="{% url 'centre_detail' centre.centre_id %}?fy={{ fy }}" class="btn-clear">✕ Clear</a>
+</form>
+
+<!-- Summary cards -->
+<div class="summary-cards">
+  <div class="summary-card" style="border-left-color:#ef4444;">
+    <div class="label">⚠ Delayed Batches</div>
+    <div id="delay-total" style="font-size:28px;font-weight:700;color:#ef4444;line-height:1;margin-bottom:2px;">—</div>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+      <div style="font-size:13px;color:var(--muted);">🎓 Enrol: <strong id="delay-enrol" style="color:#ef4444;">—</strong></div>
+      <div style="font-size:13px;color:var(--muted);">📜 Cert: <strong id="delay-cert" style="color:#ef4444;">—</strong></div>
+      <div style="font-size:13px;color:var(--muted);">💼 Place: <strong id="delay-place" style="color:#ef4444;">—</strong></div>
+    </div>
+  </div>
+
+  <div class="summary-card enrol">
+    <div class="label">🎓 Enrolment Target</div>
+    <div class="value">{{ total_row.enrol_target }}</div>
+    <div class="sub">Actual: {{ total_row.enrol_actual }}</div>
+    <div class="pct {% if total_row.enrol_pct >= 90 %}green{% elif total_row.enrol_pct >= 60 %}amber{% elif total_row.enrol_pct > 0 %}red{% else %}zero{% endif %}">{{ total_row.enrol_pct }}%</div>
+  </div>
+  <div class="summary-card cert">
+    <div class="label">📜 Certification Target</div>
+    <div class="value">{{ total_row.cert_target }}</div>
+    <div class="sub">Actual: {{ total_row.cert_actual }}</div>
+    <div class="pct {% if total_row.cert_pct >= 90 %}green{% elif total_row.cert_pct >= 60 %}amber{% elif total_row.cert_pct > 0 %}red{% else %}zero{% endif %}">{{ total_row.cert_pct }}%</div>
+  </div>
+  <div class="summary-card place">
+    <div class="label">💼 Placement Target</div>
+    <div class="value">{{ total_row.place_target }}</div>
+    <div class="sub">Actual: {{ total_row.place_actual }}</div>
+    <div class="pct {% if total_row.place_pct >= 90 %}green{% elif total_row.place_pct >= 60 %}amber{% elif total_row.place_pct > 0 %}red{% else %}zero{% endif %}">{{ total_row.place_pct }}%</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">📦 Batches / QPs</div>
+    <div class="value">{{ batch_rows|length }}</div>
+    <div class="sub">{{ qp_rows|length }} Qualification Packs</div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="chart-row">
+  <div class="chart-card">
+    <div class="chart-title">📈 Enrolment — Month on Month</div>
+    <canvas id="enrolChart" height="180"></canvas>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">📈 Certification & Placement — Month on Month</div>
+    <canvas id="certPlaceChart" height="180"></canvas>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="card">
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="tab-qp" onclick="switchTab('tab-qp')">📋 QP-wise Target vs Actual</button>
+    <button class="tab-btn" data-tab="tab-mom" onclick="switchTab('tab-mom')">📅 Month on Month</button>
+    <button class="tab-btn" data-tab="tab-batch" onclick="switchTab('tab-batch')">📦 Batch-wise</button>
+    <button class="tab-btn" data-tab="tab-manpower" onclick="switchTab('tab-manpower')">👥 Manpower ({{ staff|length }})</button>
+  </div>
+
+  <!-- QP TAB (Primary) -->
+  <div id="tab-qp" class="tab-content active">
+    {% for q in qp_rows %}
+    <div class="qp-block">
+      <div class="qp-header" onclick="toggleQP('qp-{{ forloop.counter }}')">
+        <div class="qp-title">
+          <span class="qp-toggle-icon" id="icon-qp-{{ forloop.counter }}">▶</span>
+          <strong>{{ q.qp }}</strong>
+          <span style="font-size:12px;color:var(--muted);margin-left:8px;">{{ q.batch_count }} batch{{ q.batch_count|pluralize }} &nbsp;|&nbsp; {{ q.candidate_count }} candidates</span>
+        </div>
+        <div class="qp-summary-badges">
+          <span class="qp-badge enrol-bg">🎓 {{ q.enrol_actual }}/{{ q.enrol_target }}
+            <span class="badge {% if q.enrol_pct >= 90 %}green{% elif q.enrol_pct >= 60 %}amber{% elif q.enrol_pct > 0 %}red{% else %}zero{% endif %}">{{ q.enrol_pct }}%</span>
+          </span>
+          <span class="qp-badge cert-bg">📜 {{ q.cert_actual }}/{{ q.cert_target }}
+            <span class="badge {% if q.cert_pct >= 90 %}green{% elif q.cert_pct >= 60 %}amber{% elif q.cert_pct > 0 %}red{% else %}zero{% endif %}">{{ q.cert_pct }}%</span>
+          </span>
+          <span class="qp-badge place-bg">💼 {{ q.place_actual }}/{{ q.place_target }}
+            <span class="badge {% if q.place_pct >= 90 %}green{% elif q.place_pct >= 60 %}amber{% elif q.place_pct > 0 %}red{% else %}zero{% endif %}">{{ q.place_pct }}%</span>
+          </span>
+        </div>
+      </div>
+      <!-- QP Month on Month table (collapsed by default) -->
+      <div id="qp-{{ forloop.counter }}" class="qp-mom-table" style="display:none;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="left" rowspan="2">Month</th>
+                <th colspan="3" class="group-enrol">🎓 Enrolment</th>
+                <th colspan="3" class="group-cert">📜 Certification</th>
+                <th colspan="3" class="group-place">💼 Placement</th>
+              </tr>
+              <tr>
+                <th class="group-enrol group-sub">Target</th><th class="group-enrol group-sub">Actual</th><th class="group-enrol group-sub">%</th>
+                <th class="group-cert group-sub">Target</th><th class="group-cert group-sub">Actual</th><th class="group-cert group-sub">%</th>
+                <th class="group-place group-sub">Target</th><th class="group-place group-sub">Actual</th><th class="group-place group-sub">%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for m in q.mom_rows %}
+              <tr>
+                <td class="left" data-month="{{ m.month_num }}"><strong>{{ m.display }}</strong></td>
+                <td>{{ m.enrol_target }}</td><td>{{ m.enrol_actual }}</td>
+                <td>{% if m.enrol_target > 0 %}<span class="badge {% if m.enrol_pct >= 90 %}green{% elif m.enrol_pct >= 60 %}amber{% elif m.enrol_pct > 0 %}red{% else %}zero{% endif %}">{{ m.enrol_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+                <td>{{ m.cert_target }}</td><td>{{ m.cert_actual }}</td>
+                <td>{% if m.cert_target > 0 %}<span class="badge {% if m.cert_pct >= 90 %}green{% elif m.cert_pct >= 60 %}amber{% elif m.cert_pct > 0 %}red{% else %}zero{% endif %}">{{ m.cert_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+                <td>{{ m.place_target }}</td><td>{{ m.place_actual }}</td>
+                <td>{% if m.place_target > 0 %}<span class="badge {% if m.place_pct >= 90 %}green{% elif m.place_pct >= 60 %}amber{% elif m.place_pct > 0 %}red{% else %}zero{% endif %}">{{ m.place_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+              </tr>
+              {% endfor %}
+              <!-- QP Total row -->
+              <tr class="tfoot-row">
+                <td class="left"><strong>Total</strong></td>
+                <td><strong>{{ q.enrol_target }}</strong></td><td><strong>{{ q.enrol_actual }}</strong></td>
+                <td><span class="badge {% if q.enrol_pct >= 90 %}green{% elif q.enrol_pct >= 60 %}amber{% elif q.enrol_pct > 0 %}red{% else %}zero{% endif %}">{{ q.enrol_pct }}%</span></td>
+                <td><strong>{{ q.cert_target }}</strong></td><td><strong>{{ q.cert_actual }}</strong></td>
+                <td><span class="badge {% if q.cert_pct >= 90 %}green{% elif q.cert_pct >= 60 %}amber{% elif q.cert_pct > 0 %}red{% else %}zero{% endif %}">{{ q.cert_pct }}%</span></td>
+                <td><strong>{{ q.place_target }}</strong></td><td><strong>{{ q.place_actual }}</strong></td>
+                <td><span class="badge {% if q.place_pct >= 90 %}green{% elif q.place_pct >= 60 %}amber{% elif q.place_pct > 0 %}red{% else %}zero{% endif %}">{{ q.place_pct }}%</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Batch drill-down for this QP -->
+        <div style="padding:8px 16px 4px;border-top:1px solid var(--border);background:var(--bg-alt,#f8fafc);">
+          <span style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.5px;">📦 BATCH DRILL-DOWN</span>
+        </div>
+        <div class="table-wrap" style="background:var(--bg-alt,#f8fafc);">
+          <table style="font-size:12px;">
+            <thead>
+              <tr>
+                <th class="left">Batch ID</th>
+                <th>📅 Enrol Plan</th><th>📅 Cert Plan</th><th>📅 Place Plan</th>
+                <th class="group-enrol group-sub">E.Target</th><th class="group-enrol group-sub">E.Actual</th><th class="group-enrol group-sub">E.%</th>
+                <th class="group-cert group-sub">C.Target</th><th class="group-cert group-sub">C.Actual</th><th class="group-cert group-sub">C.%</th>
+                <th class="group-place group-sub">P.Target</th><th class="group-place group-sub">P.Actual</th><th class="group-place group-sub">P.%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for b in batch_rows %}{% if b.qp == q.qp %}
+              <tr>
+                <td class="left" style="font-family:monospace;font-size:11px;">{{ b.batch_id }}</td>
+                <td style="white-space:nowrap;">
+                  {{ b.enrol_planned_date|date:"d M y" }}
+                  {% if b.enrol_delayed %}
+                    <span class="badge red" title="{% if b.enrol_delay_type == 'late_start' %}Started {{ b.enrol_delay_days }} days late{% else %}Not started — {{ b.enrol_delay_days }} days overdue{% endif %}">
+                      ⚠ {{ b.enrol_delay_days }}d {% if b.enrol_delay_type == 'late_start' %}late start{% else %}overdue{% endif %}
+                    </span>
+                  {% endif %}
+                </td>
+                <td style="white-space:nowrap;">
+                  {{ b.cert_planned_date|date:"d M y" }}
+                  {% if b.cert_delayed %}<span class="badge red" title="{% if b.cert_delay_type == 'late_cert' %}Certified {{ b.cert_delay_days }} days late{% else %}Not certified — {{ b.cert_delay_days }} days overdue{% endif %}">⚠ {{ b.cert_delay_days }}d {% if b.cert_delay_type == 'late_cert' %}late{% else %}overdue{% endif %}</span>{% endif %}
+                </td>
+                <td style="white-space:nowrap;">
+                  {{ b.place_planned_date|date:"d M y" }}
+                  {% if b.place_delayed %}<span class="badge red" title="{% if b.place_delay_type == 'late_place' %}Placed {{ b.place_delay_days }} days late{% else %}Not placed — {{ b.place_delay_days }} days overdue{% endif %}">⚠ {{ b.place_delay_days }}d {% if b.place_delay_type == 'late_place' %}late{% else %}overdue{% endif %}</span>{% endif %}
+                </td>
+                <td>{{ b.enrol_target }}</td><td>{{ b.enrol_actual }}</td>
+                <td>{% if b.enrol_target > 0 %}<span class="badge {% if b.enrol_pct >= 90 %}green{% elif b.enrol_pct >= 60 %}amber{% elif b.enrol_pct > 0 %}red{% else %}zero{% endif %}">{{ b.enrol_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+                <td>{{ b.cert_target }}</td><td>{{ b.cert_actual }}</td>
+                <td>{% if b.cert_target > 0 %}<span class="badge {% if b.cert_pct >= 90 %}green{% elif b.cert_pct >= 60 %}amber{% elif b.cert_pct > 0 %}red{% else %}zero{% endif %}">{{ b.cert_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+                <td>{{ b.place_target }}</td><td>{{ b.place_actual }}</td>
+                <td>{% if b.place_target > 0 %}<span class="badge {% if b.place_pct >= 90 %}green{% elif b.place_pct >= 60 %}amber{% elif b.place_pct > 0 %}red{% else %}zero{% endif %}">{{ b.place_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+              </tr>
+              {% endif %}{% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    {% empty %}
+    <div style="padding:32px;text-align:center;color:var(--muted);">No QP data found for this centre</div>
+    {% endfor %}
+  </div>
+
+  <!-- MoM Tab -->
+  <div id="tab-mom" class="tab-content">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="left" rowspan="2">Month</th>
+            <th colspan="3" class="group-enrol">🎓 Enrolment</th>
+            <th colspan="3" class="group-cert">📜 Certification</th>
+            <th colspan="3" class="group-place">💼 Placement</th>
+          </tr>
+          <tr>
+            <th class="group-enrol group-sub">Target</th><th class="group-enrol group-sub">Actual</th><th class="group-enrol group-sub">%</th>
+            <th class="group-cert group-sub">Target</th><th class="group-cert group-sub">Actual</th><th class="group-cert group-sub">%</th>
+            <th class="group-place group-sub">Target</th><th class="group-place group-sub">Actual</th><th class="group-place group-sub">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in mom_months %}
+          <tr>
+            <td class="left" data-month="{{ m.month_num }}"><strong>{{ m.display }}</strong></td>
+            <td data-month="{{ m.month_num }}">{{ m.enrol_target }}</td><td data-month="{{ m.month_num }}">{{ m.enrol_actual }}</td>
+            <td data-month="{{ m.month_num }}">{% if m.enrol_target > 0 %}<span class="badge {% if m.enrol_pct >= 90 %}green{% elif m.enrol_pct >= 60 %}amber{% elif m.enrol_pct > 0 %}red{% else %}zero{% endif %}">{{ m.enrol_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+            <td data-month="{{ m.month_num }}">{{ m.cert_target }}</td><td data-month="{{ m.month_num }}">{{ m.cert_actual }}</td>
+            <td data-month="{{ m.month_num }}">{% if m.cert_target > 0 %}<span class="badge {% if m.cert_pct >= 90 %}green{% elif m.cert_pct >= 60 %}amber{% elif m.cert_pct > 0 %}red{% else %}zero{% endif %}">{{ m.cert_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+            <td data-month="{{ m.month_num }}">{{ m.place_target }}</td><td data-month="{{ m.month_num }}">{{ m.place_actual }}</td>
+            <td data-month="{{ m.month_num }}">{% if m.place_target > 0 %}<span class="badge {% if m.place_pct >= 90 %}green{% elif m.place_pct >= 60 %}amber{% elif m.place_pct > 0 %}red{% else %}zero{% endif %}">{{ m.place_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Batch Tab -->
+  <div id="tab-batch" class="tab-content">
+    <div style="padding:10px 16px;font-size:12px;color:var(--muted);">
+      ⚠ <strong>Red badge</strong> = delay detected. "overdue" = planned date has passed with 0 actual (shows days from plan to today). "late" = actual occurred after the planned date (shows days between plan and actual).
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="left">Batch ID</th>
+            <th class="left">QP</th>
+            <th>📅 Enrol Plan</th><th>📅 Cert Plan</th><th>📅 Place Plan</th>
+            <th class="group-enrol group-sub">E.Target</th><th class="group-enrol group-sub">E.Actual</th><th class="group-enrol group-sub">E.%</th>
+            <th class="group-cert group-sub">C.Target</th><th class="group-cert group-sub">C.Actual</th><th class="group-cert group-sub">C.%</th>
+            <th class="group-place group-sub">P.Target</th><th class="group-place group-sub">P.Actual</th><th class="group-place group-sub">P.%</th>
+            <th>ECP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in batch_rows %}
+          <tr {% if b.enrol_delayed or b.cert_delayed or b.place_delayed %}style="background:rgba(239,68,68,0.04);"{% endif %}>
+            <td class="left" style="font-size:11px;font-family:monospace;">{{ b.batch_id }}</td>
+            <td class="left" style="max-width:180px;white-space:normal;font-size:12px;">{{ b.qp }}</td>
+            <td style="font-size:12px;white-space:nowrap;">
+              {{ b.enrol_planned_date|date:"d M y" }}
+              {% if b.enrol_delayed %}<br><span class="badge red">⚠ {{ b.enrol_delay_days }}d {% if b.enrol_delay_type == 'late_start' %}late start{% else %}overdue{% endif %}</span>{% endif %}
+            </td>
+            <td style="font-size:12px;white-space:nowrap;">
+              {{ b.cert_planned_date|date:"d M y" }}
+              {% if b.cert_delayed %}<br><span class="badge red">⚠ {{ b.cert_delay_days }}d {% if b.cert_delay_type == 'late_cert' %}late{% else %}overdue{% endif %}</span>{% endif %}
+            </td>
+            <td style="font-size:12px;white-space:nowrap;">
+              {{ b.place_planned_date|date:"d M y" }}
+              {% if b.place_delayed %}<br><span class="badge red">⚠ {{ b.place_delay_days }}d {% if b.place_delay_type == 'late_place' %}late{% else %}overdue{% endif %}</span>{% endif %}
+            </td>
+            <td>{{ b.enrol_target }}</td><td>{{ b.enrol_actual }}</td>
+            <td>{% if b.enrol_target > 0 %}<span class="badge {% if b.enrol_pct >= 90 %}green{% elif b.enrol_pct >= 60 %}amber{% elif b.enrol_pct > 0 %}red{% else %}zero{% endif %}">{{ b.enrol_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+            <td>{{ b.cert_target }}</td><td>{{ b.cert_actual }}</td>
+            <td>{% if b.cert_target > 0 %}<span class="badge {% if b.cert_pct >= 90 %}green{% elif b.cert_pct >= 60 %}amber{% elif b.cert_pct > 0 %}red{% else %}zero{% endif %}">{{ b.cert_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+            <td>{{ b.place_target }}</td><td>{{ b.place_actual }}</td>
+            <td>{% if b.place_target > 0 %}<span class="badge {% if b.place_pct >= 90 %}green{% elif b.place_pct >= 60 %}amber{% elif b.place_pct > 0 %}red{% else %}zero{% endif %}">{{ b.place_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+            <td>{{ b.total_candidates }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="15" style="text-align:center;color:var(--muted);padding:24px;">No batches found</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Manpower Tab -->
+  <div id="tab-manpower" class="tab-content">
+    {% if role_summary %}
+    <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <span style="font-size:13px;font-weight:600;color:var(--muted);">Role Summary:</span>
+      {% for role, count in role_summary.items %}
+        <span class="role-badge">{{ role }}: <strong>{{ count }}</strong></span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="left">Employee Name</th>
+            <th class="left">Role</th>
+            <th class="left">Centre (Ops)</th>
+            <th>Status</th>
+            <th class="left">Sub Project</th>
+            <th class="left">Email</th>
+            <th>Ecode</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in staff %}
+          <tr>
+            <td class="left"><strong>{{ s.employee_name }}</strong></td>
+            <td class="left"><span class="role-badge">{{ s.role }}</span></td>
+            <td class="left" style="font-size:12px;">{{ s.center_name_ops }}</td>
+            <td><span class="{% if s.employee_status == 'Active' %}status-active{% else %}status-inactive{% endif %}">{{ s.employee_status }}</span></td>
+            <td class="left" style="font-size:12px;">{{ s.sub_project_name }}</td>
+            <td class="left" style="font-size:12px;">{{ s.official_email }}</td>
+            <td style="font-size:12px;">{{ s.ecode }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px;">No manpower data for this centre</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Trainer & Mobilizer Status -->
+{% include "dashboard/_staff_status.html" %}
+
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const months = {{ mom_months|safe }};
+const batchDelayData = {{ batch_rows_json|safe }};
+(function() {
+  const de = batchDelayData.filter(b => b.enrol_delayed).length;
+  const dc = batchDelayData.filter(b => b.cert_delayed).length;
+  const dp = batchDelayData.filter(b => b.place_delayed).length;
+  document.getElementById('delay-enrol').textContent = de;
+  document.getElementById('delay-cert').textContent  = dc;
+  document.getElementById('delay-place').textContent = dp;
+  document.getElementById('delay-total').textContent = de + dc + dp;
+})();
+const labels = months.map(m => m.display);
+new Chart(document.getElementById('enrolChart'), {
+  type: 'bar', data: { labels,
+    datasets: [
+      { label: 'Target', data: months.map(m => m.enrol_target), backgroundColor: 'rgba(59,130,246,0.25)', borderColor: '#3b82f6', borderWidth: 2 },
+      { label: 'Actual', data: months.map(m => m.enrol_actual), backgroundColor: 'rgba(59,130,246,0.7)', borderColor: '#1d4ed8', borderWidth: 1 }
+    ]},
+  options: { responsive: true, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true } } }
+});
+new Chart(document.getElementById('certPlaceChart'), {
+  type: 'bar', data: { labels,
+    datasets: [
+      { label: 'Cert Target', data: months.map(m => m.cert_target), backgroundColor: 'rgba(139,92,246,0.2)', borderColor: '#8b5cf6', borderWidth: 2 },
+      { label: 'Cert Actual', data: months.map(m => m.cert_actual), backgroundColor: 'rgba(139,92,246,0.6)', borderColor: '#6d28d9', borderWidth: 1 },
+      { label: 'Place Target', data: months.map(m => m.place_target), backgroundColor: 'rgba(16,185,129,0.2)', borderColor: '#10b981', borderWidth: 2 },
+      { label: 'Place Actual', data: months.map(m => m.place_actual), backgroundColor: 'rgba(16,185,129,0.6)', borderColor: '#065f46', borderWidth: 1 }
+    ]},
+  options: { responsive: true, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true } } }
+});
+
+function toggleQP(id) {
+  const el = document.getElementById(id);
+  const icon = document.getElementById('icon-' + id);
+  if (el.style.display === 'none') {
+    el.style.display = 'block';
+    icon.textContent = '▼';
+  } else {
+    el.style.display = 'none';
+    icon.textContent = '▶';
+  }
+}
+</script>
+{% endblock %}

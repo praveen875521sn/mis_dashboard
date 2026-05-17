@@ -1,0 +1,970 @@
+{% extends "dashboard/base.html" %}
+{% block title %}MIS Dashboard{% endblock %}
+
+{% block content %}
+
+{# Active tab detection: use request.GET.tab directly in all conditionals #}
+
+<div class="page-header">
+  <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+    <a href="{% url 'home' %}{% if cluster_filter or sub_cluster_filter %}?cluster={{ cluster_filter }}&sub_cluster={{ sub_cluster_filter }}{% endif %}"
+       style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;color:var(--primary);text-decoration:none;margin-top:4px;white-space:nowrap;">
+      ← Back to Home
+    </a>
+    <div>
+      <div class="page-title">
+        📊 MIS Dashboard
+        {% if active_tab == 'sahi' %}
+          <span class="page-tab-indicator sahi">🏫 SAHI</span>
+        {% else %}
+          <span class="page-tab-indicator">📊 Employability</span>
+        {% endif %}
+        {% if cluster_filter %}
+          <span style="font-size:13px;font-weight:600;background:var(--primary);color:#fff;padding:3px 10px;border-radius:20px;vertical-align:middle;margin-left:6px;">
+            📍 {{ cluster_filter }}{% if sub_cluster_filter %} › {{ sub_cluster_filter }}{% endif %}
+          </span>
+        {% endif %}
+      </div>
+      <div class="page-subtitle">
+        {% if active_tab == 'sahi' %}
+          Demand · Supply · ITI/Diploma · SF Intervention Colleges
+        {% else %}
+          Centre-wise Month on Month Target vs Actual | Financial Year April–March
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% if active_tab != 'sahi' %}
+  <div class="fy-selector">
+    <label>Financial Year:</label>
+    <select id="fy-select">
+      {% for f in available_fys %}
+        <option value="{{ f }}" {% if f == fy %}selected{% endif %}>FY {{ f }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+</div>
+
+{# EMPLOYABILITY TAB PANEL #}
+<div class="tab-panel {% if active_tab != 'sahi' %}active{% endif %}" id="panel-employability" {% if active_tab == 'sahi' %}style="display:none;"{% endif %}>
+
+<!-- FILTER BAR -->
+<form method="get" class="filter-bar" id="main-filter-form">
+  <input type="hidden" name="fy" value="{{ fy }}">
+  {% if cluster_filter %}<input type="hidden" name="cluster" value="{{ cluster_filter }}">{% endif %}
+  {% if sub_cluster_filter %}<input type="hidden" name="sub_cluster" value="{{ sub_cluster_filter }}">{% endif %}
+
+  <!-- Row 1: BU Head → TM Name -->
+  <div class="filter-row">
+    <div class="filter-group">
+      <label>👤 BU Head</label>
+      <select name="bu_head" id="f-bu-head">
+        <option value="">All BU Heads</option>
+        {% for b in bu_heads %}
+          <option value="{{ b }}" {% if b == bu_head %}selected{% endif %}>{{ b }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>👥 TM Name</label>
+      <select name="tm_name" id="f-tm-name">
+        <option value="">All TMs</option>
+        {% for t in tm_names %}
+          <option value="{{ t }}" {% if t == tm_name_filter %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <!-- Row 2: Project → Centre → QP -->
+  <div class="filter-row">
+    <div class="filter-group">
+      <label>🏗️ Project Name</label>
+      <select name="project" id="f-project">
+        <option value="">All Projects</option>
+        {% for p in projects %}
+          <option value="{{ p }}" {% if p == project_name %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>🏢 Centre Name</label>
+      <select name="centre" id="f-centre">
+        <option value="">All Centres</option>
+        {% for c in centres %}
+          <option value="{{ c.centre_id }}" {% if c.centre_id == centre_id_filter %}selected{% endif %}>{{ c.centre_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>📋 QP</label>
+      <select name="qp" id="f-qp">
+        <option value="">All QPs</option>
+        {% for q in qps %}
+          <option value="{{ q }}" {% if q == request.GET.qp %}selected{% endif %}>{{ q }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="filter-actions">
+    <button type="submit" class="btn-filter">Apply Filter</button>
+    <a href="?fy={{ fy }}{% if cluster_filter %}&cluster={{ cluster_filter }}{% endif %}{% if sub_cluster_filter %}&sub_cluster={{ sub_cluster_filter }}{% endif %}" class="btn-clear">✕ Clear</a>
+  </div>
+</form>
+
+<!-- Summary Cards -->
+<div class="summary-cards">
+  <div class="summary-card enrol">
+    <div class="label">🎓 Total Enrolment</div>
+    <div class="value">{{ total_row.enrol_actual }}</div>
+    <div class="sub">Target: {{ total_row.enrol_target }}</div>
+    <div class="pct {% if total_row.enrol_target > 0 %}{% widthratio total_row.enrol_actual total_row.enrol_target 100 as ep %}{% if ep >= 90 %}green{% elif ep >= 60 %}amber{% else %}red{% endif %}{% endif %}">
+      {% if total_row.enrol_target > 0 %}{% widthratio total_row.enrol_actual total_row.enrol_target 100 %}% achieved{% else %}No target{% endif %}
+    </div>
+  </div>
+  <div class="summary-card cert">
+    <div class="label">📜 Total Certification</div>
+    <div class="value">{{ total_row.cert_actual }}</div>
+    <div class="sub">Target: {{ total_row.cert_target }}</div>
+    <div class="pct">
+      {% if total_row.cert_target > 0 %}{% widthratio total_row.cert_actual total_row.cert_target 100 %}% achieved{% else %}No target{% endif %}
+    </div>
+  </div>
+  <div class="summary-card place">
+    <div class="label">💼 Total Placement</div>
+    <div class="value">{{ total_row.place_actual }}</div>
+    <div class="sub">Target: {{ total_row.place_target }}</div>
+    <div class="pct">
+      {% if total_row.place_target > 0 %}{% widthratio total_row.place_actual total_row.place_target 100 %}% achieved{% else %}No target{% endif %}
+    </div>
+  </div>
+  <div class="summary-card">
+    <div class="label">🏢 Centres</div>
+    <div class="value">{{ centre_summary|length }}</div>
+    <div class="sub">👥 Staff: {{ staff_list|length }}</div>
+  </div>
+  <div class="summary-card" style="border-left-color:#ef4444;">
+    <div class="label">⚠ Delayed Batches</div>
+    <div id="idx-delay-total" style="font-size:28px;font-weight:700;color:#ef4444;line-height:1;margin-bottom:2px;">{{ delay_all_total }}</div>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+      <div style="font-size:13px;color:var(--muted);">🎓 Enrol: <strong style="color:#ef4444;">{{ delay_all_enrol }}</strong></div>
+      <div style="font-size:13px;color:var(--muted);">📜 Cert: <strong style="color:#ef4444;">{{ delay_all_cert }}</strong></div>
+      <div style="font-size:13px;color:var(--muted);">💼 Place: <strong style="color:#ef4444;">{{ delay_all_place }}</strong></div>
+    </div>
+  </div>
+  <div class="summary-card" style="border-left-color:#f97316;">
+    <div class="label">⏳ Delayed Batches Pending</div>
+    <div style="font-size:28px;font-weight:700;color:#f97316;line-height:1;margin-bottom:2px;">{{ delay_total_count }}</div>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+      <div style="font-size:13px;color:var(--muted);">🎓 Enrol: <strong style="color:#f97316;">{{ delay_enrol_count }}</strong></div>
+      <div style="font-size:13px;color:var(--muted);">📜 Cert: <strong style="color:#f97316;">{{ delay_cert_count }}</strong></div>
+      <div style="font-size:13px;color:var(--muted);">💼 Place: <strong style="color:#f97316;">{{ delay_place_count }}</strong></div>
+    </div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="chart-row">
+  <div class="chart-card">
+    <div class="chart-title">📈 Enrolment — Month on Month</div>
+    <canvas id="enrolChart" height="180"></canvas>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">📈 Certification & Placement — Month on Month</div>
+    <canvas id="certPlaceChart" height="180"></canvas>
+  </div>
+</div>
+
+<!-- Centre-wise Summary Table -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">🏢 Centre-wise Summary — FY {{ fy }}</div>
+    <div style="font-size:12px;color:var(--muted);">Click centre name → QP-wise Target vs Actual drill-down</div>
+  </div>
+  <div class="card-body table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="left" rowspan="2">Centre Name</th>
+          <th rowspan="2">BU Head</th>
+          <th rowspan="2">TM Name</th>
+          <th colspan="3" class="group-enrol">🎓 Enrolment</th>
+          <th colspan="3" class="group-cert">📜 Certification</th>
+          <th colspan="3" class="group-place">💼 Placement</th>
+        </tr>
+        <tr>
+          <th class="group-enrol group-sub">Target</th><th class="group-enrol group-sub">Actual</th><th class="group-enrol group-sub">%</th>
+          <th class="group-cert group-sub">Target</th><th class="group-cert group-sub">Actual</th><th class="group-cert group-sub">%</th>
+          <th class="group-place group-sub">Target</th><th class="group-place group-sub">Actual</th><th class="group-place group-sub">%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in centre_summary %}
+        <tr>
+          <td class="left">
+            <a href="{% url 'centre_detail' row.centre_id %}?fy={{ fy }}{% if project_name %}&project={{ project_name }}{% endif %}" class="centre-link">{{ row.centre_name }}</a>
+            <div style="font-size:11px;color:var(--muted);">{{ row.centre_id }}</div>
+          </td>
+          <td style="font-size:12px;">{{ row.bu_head }}</td>
+          <td style="font-size:12px;">{{ row.tm_name }}</td>
+          <td>{{ row.enrol_target }}</td><td>{{ row.enrol_actual }}</td>
+          <td>{% if row.enrol_target > 0 %}<span class="badge {% if row.enrol_pct >= 90 %}green{% elif row.enrol_pct >= 60 %}amber{% elif row.enrol_pct > 0 %}red{% else %}zero{% endif %}">{{ row.enrol_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+          <td>{{ row.cert_target }}</td><td>{{ row.cert_actual }}</td>
+          <td>{% if row.cert_target > 0 %}<span class="badge {% if row.cert_pct >= 90 %}green{% elif row.cert_pct >= 60 %}amber{% elif row.cert_pct > 0 %}red{% else %}zero{% endif %}">{{ row.cert_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+          <td>{{ row.place_target }}</td><td>{{ row.place_actual }}</td>
+          <td>{% if row.place_target > 0 %}<span class="badge {% if row.place_pct >= 90 %}green{% elif row.place_pct >= 60 %}amber{% elif row.place_pct > 0 %}red{% else %}zero{% endif %}">{{ row.place_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="tfoot-row">
+          <td class="left" colspan="3"><strong>TOTAL</strong></td>
+          <td><strong>{{ total_row.enrol_target }}</strong></td><td><strong>{{ total_row.enrol_actual }}</strong></td>
+          <td>{% if total_row.enrol_target > 0 %}{% widthratio total_row.enrol_actual total_row.enrol_target 100 as tp %}<span class="badge {% if tp >= 90 %}green{% elif tp >= 60 %}amber{% elif tp > 0 %}red{% else %}zero{% endif %}">{{ tp }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+          <td><strong>{{ total_row.cert_target }}</strong></td><td><strong>{{ total_row.cert_actual }}</strong></td>
+          <td>{% if total_row.cert_target > 0 %}{% widthratio total_row.cert_actual total_row.cert_target 100 as tcp %}<span class="badge {% if tcp >= 90 %}green{% elif tcp >= 60 %}amber{% elif tcp > 0 %}red{% else %}zero{% endif %}">{{ tcp }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+          <td><strong>{{ total_row.place_target }}</strong></td><td><strong>{{ total_row.place_actual }}</strong></td>
+          <td>{% if total_row.place_target > 0 %}{% widthratio total_row.place_actual total_row.place_target 100 as tpp %}<span class="badge {% if tpp >= 90 %}green{% elif tpp >= 60 %}amber{% elif tpp > 0 %}red{% else %}zero{% endif %}">{{ tpp }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- MoM Table -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">📅 Month on Month — Overall Target vs Actual</div>
+  </div>
+  <div class="card-body table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="left" rowspan="2">Month</th>
+          <th colspan="3" class="group-enrol">🎓 Enrolment</th>
+          <th colspan="3" class="group-cert">📜 Certification</th>
+          <th colspan="3" class="group-place">💼 Placement</th>
+        </tr>
+        <tr>
+          <th class="group-enrol group-sub">Target</th><th class="group-enrol group-sub">Actual</th><th class="group-enrol group-sub">%</th>
+          <th class="group-cert group-sub">Target</th><th class="group-cert group-sub">Actual</th><th class="group-cert group-sub">%</th>
+          <th class="group-place group-sub">Target</th><th class="group-place group-sub">Actual</th><th class="group-place group-sub">%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in mom_months_list %}
+        <tr>
+          <td class="left"><strong>{{ m.display }}</strong></td>
+          <td>{{ m.enrol_target }}</td><td>{{ m.enrol_actual }}</td>
+          <td>{% if m.enrol_target > 0 %}<span class="badge {% if m.enrol_pct >= 90 %}green{% elif m.enrol_pct >= 60 %}amber{% elif m.enrol_pct > 0 %}red{% else %}zero{% endif %}">{{ m.enrol_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+          <td>{{ m.cert_target }}</td><td>{{ m.cert_actual }}</td>
+          <td>{% if m.cert_target > 0 %}<span class="badge {% if m.cert_pct >= 90 %}green{% elif m.cert_pct >= 60 %}amber{% elif m.cert_pct > 0 %}red{% else %}zero{% endif %}">{{ m.cert_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+          <td>{{ m.place_target }}</td><td>{{ m.place_actual }}</td>
+          <td>{% if m.place_target > 0 %}<span class="badge {% if m.place_pct >= 90 %}green{% elif m.place_pct >= 60 %}amber{% elif m.place_pct > 0 %}red{% else %}zero{% endif %}">{{ m.place_pct }}%</span>{% else %}<span class="badge zero">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     DELAYED BATCHES TABLE
+     ═══════════════════════════════════════════════════════════════════════════ -->
+{% if delayed_batches %}
+<div class="card" id="delayed-batches-card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div class="card-title">⚠ Delayed Batches</div>
+      <div style="font-size:12px;color:var(--muted);">Batches where planned date has passed with zero actuals — sorted by most delayed</div>
+    </div>
+    <span style="font-size:12px;color:var(--muted);">{{ delayed_batches|length }} delay record{{ delayed_batches|length|pluralize }}</span>
+  </div>
+  <div class="card-body table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Project</th>
+          <th class="left">Centre</th>
+          <th class="left">Batch ID</th>
+          <th class="left">QP</th>
+          <th class="left">Delay Type</th>
+          <th class="left">Planned Date</th>
+          <th style="text-align:center;">Delay Days</th>
+          <th style="text-align:center;">Target</th>
+          <th style="text-align:center;">Actual</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in delayed_batches %}
+        <tr>
+          <td class="left" style="font-size:12px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ d.project_name }}">{{ d.project_name }}</td>
+          <td class="left" style="font-size:12px;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ d.centre_name }}">
+            <a href="/centre/{{ d.centre_id }}/" style="color:var(--primary);text-decoration:none;">{{ d.centre_name }}</a>
+          </td>
+          <td class="left" style="font-size:12px;white-space:nowrap;">{{ d.batch_id }}</td>
+          <td class="left" style="font-size:12px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ d.qp }}">{{ d.qp }}</td>
+          <td class="left" style="font-size:12px;">
+            {% if d.type == 'Enrolment' %}<span class="badge" style="background:rgba(59,130,246,.12);color:#1e40af;border:1px solid rgba(59,130,246,.3);">🎓 Enrolment</span>
+            {% elif d.type == 'Certification' %}<span class="badge" style="background:rgba(139,92,246,.12);color:#5b21b6;border:1px solid rgba(139,92,246,.3);">📜 Certification</span>
+            {% else %}<span class="badge" style="background:rgba(16,185,129,.12);color:#065f46;border:1px solid rgba(16,185,129,.3);">💼 Placement</span>{% endif %}
+          </td>
+          <td class="left" style="font-size:12px;white-space:nowrap;">{{ d.planned_date|date:"d M y" }}</td>
+          <td style="text-align:center;">
+            <span class="badge red" style="font-weight:700;">
+              ⚠ {{ d.delay_days }}d
+              {% if d.delay_type == 'overdue' %}overdue{% elif d.delay_type == 'late_start' %}late start{% elif d.delay_type == 'late_cert' %}late cert{% elif d.delay_type == 'late_place' %}late place{% endif %}
+            </span>
+          </td>
+          <td style="text-align:center;font-size:13px;">{{ d.target }}</td>
+          <td style="text-align:center;font-size:13px;">{{ d.actual }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     COMMUNITY COLLEGES TABLE
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="card" id="community-colleges-card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div class="card-title">🏫 Community Colleges &amp; Training Institutes</div>
+      <div style="font-size:12px;color:var(--muted);">Nearby institutes mapped to each centre — select a centre to filter</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select id="cc-centre-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
+        <option value="">All Centres</option>
+        {% for c in centres %}
+          <option value="{{ c.centre_id }}" {% if c.centre_id == centre_id_filter %}selected{% endif %}>{{ c.centre_name }}</option>
+        {% endfor %}
+      </select>
+      <select id="cc-category-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
+        <option value="">All Categories</option>
+      </select>
+      <span id="cc-count" style="font-size:12px;color:var(--muted);white-space:nowrap;">Loading...</span>
+    </div>
+  </div>
+  <div class="card-body table-wrap">
+    <table id="cc-table">
+      <thead>
+        <tr>
+          <th class="left">Category</th>
+          <th class="left">Name / Place</th>
+          <th class="left">Address</th>
+          <th class="left">Phone / Hours</th>
+          <th class="left">Centre Name</th>
+          <th>Distance (km)</th>
+          <th>Rating</th>
+        </tr>
+      </thead>
+      <tbody id="cc-tbody">
+        <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     HYPERLOCAL JOBS TABLE
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- Manpower Table -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">👥 Manpower — All Centres</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      {% for role, count in role_summary.items %}
+        <span class="role-badge">{{ role }}: <strong>{{ count }}</strong></span>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="card-body table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Employee Name</th>
+          <th class="left">Role</th>
+          <th class="left">Centre</th>
+          <th>Status</th>
+          <th class="left">Sub Project</th>
+          <th class="left">Email</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in staff_list %}
+        <tr>
+          <td class="left"><strong>{{ s.employee_name }}</strong></td>
+          <td class="left"><span class="role-badge">{{ s.role }}</span></td>
+          <td class="left" style="font-size:12px;">{{ s.center_name_ops }}</td>
+          <td><span class="{% if s.employee_status == 'Active' %}status-active{% else %}status-inactive{% endif %}">{{ s.employee_status }}</span></td>
+          <td class="left" style="font-size:12px;">{{ s.sub_project_name }}</td>
+          <td class="left" style="font-size:12px;">{{ s.official_email }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted);">No manpower data found</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+<!-- Trainer & Mobilizer Status -->
+{% include "dashboard/_staff_status.html" %}
+
+</div>{# /tab-panel employability #}
+
+{# STAFFING TAB PANEL #}
+<div class="tab-panel {% if active_tab == 'sahi' %}active{% endif %}" id="panel-sahi" {% if active_tab != 'sahi' %}style="display:none;"{% endif %}>
+
+  {# Shared Filter Bar #}
+  <div class="sahi-filter-bar" id="sahi-filter-bar">
+    <div class="sahi-section-label">🔍 Filter — applies to each table independently via its own Apply button</div>
+    <div class="filter-row">
+      <div class="filter-group">
+        <label>🗺️ Region</label>
+        <select id="sf-region">
+          <option value="">All Regions</option>
+          {% for r in staffing_regions %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>🏙️ City / Location</label>
+        <select id="sf-city">
+          <option value="">All Cities</option>
+          {% for c in staffing_cities %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>🏗️ Industrial Estate / Cluster</label>
+        <select id="sf-cluster">
+          <option value="">All Clusters</option>
+          {% for cl in staffing_clusters %}<option value="{{ cl }}">{{ cl }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>🏢 Existing Client</label>
+        <select id="sf-client">
+          <option value="">All Clients</option>
+          {% for cl in staffing_clients %}<option value="{{ cl }}">{{ cl }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="filter-actions">
+      <button class="btn-filter" onclick="applyAllSahiFilters()">Apply All Filters</button>
+      <button class="btn-clear" onclick="clearAllSahiFilters()">✕ Clear</button>
+    </div>
+  </div>
+
+  <div class="sahi-grid">
+
+    {# TABLE 1: Demand #}
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">📦 Demand Master</div>
+          <div style="font-size:12px;color:var(--muted);">Industry demand by region &amp; designation</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span id="demand-count" style="font-size:12px;color:var(--muted);">Loading...</span>
+          <button class="btn-filter" style="padding:5px 12px;font-size:12px;" onclick="loadDemand()">Apply</button>
+        </div>
+      </div>
+      <div class="card-body table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="left">Region</th>
+              <th class="left">City / Location</th>
+              <th class="left">Industrial Estate / Cluster</th>
+              <th class="left">Existing Client</th>
+              <th class="left">Std Designation</th>
+              <th>Est. Monthly Demand</th>
+            </tr>
+          </thead>
+          <tbody id="demand-tbody">
+            <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# TABLE 2: Supply / Nearest Centre #}
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🏢 Nearest Centre &amp; Supply</div>
+          <div style="font-size:12px;color:var(--muted);">Training centre capacity vs demand mapping</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span id="supply-count" style="font-size:12px;color:var(--muted);">Loading...</span>
+          <button class="btn-filter" style="padding:5px 12px;font-size:12px;" onclick="loadSupply()">Apply</button>
+        </div>
+      </div>
+      <div class="card-body table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="left">Nearest Center</th>
+              <th class="left">Centre ID</th>
+              <th class="left">Center Address</th>
+              <th class="left">Training Program Match</th>
+              <th>Est. Monthly Supply</th>
+            </tr>
+          </thead>
+          <tbody id="supply-tbody">
+            <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>{# /sahi-grid #}
+
+  {# TABLE 3: ITI and Diploma Master #}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">🎓 ITI &amp; Diploma Master</div>
+        <div style="font-size:12px;color:var(--muted);">Colleges mapped to nearest centres</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="iti-type-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
+          <option value="">All Types</option>
+          <option value="ITI">ITI</option>
+          <option value="Diploma">Diploma</option>
+        </select>
+        <span id="iti-count" style="font-size:12px;color:var(--muted);">Loading...</span>
+        <button class="btn-filter" style="padding:5px 12px;font-size:12px;" onclick="loadITI()">Apply</button>
+      </div>
+    </div>
+    <div class="card-body table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="left">College Name</th>
+            <th>Type</th>
+            <th class="left">Address</th>
+            <th>Rating</th>
+            <th>Phone Number</th>
+            <th class="left">Working Hours</th>
+            <th class="left">Centre Name</th>
+          </tr>
+        </thead>
+        <tbody id="iti-tbody">
+          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# TABLE 4: SF Intervention Colleges #}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">⭐ SF Intervention Colleges <span style="font-size:12px;font-weight:400;color:var(--muted);">— Our ITI Colleges</span></div>
+        <div style="font-size:12px;color:var(--muted);">Direct partner colleges under SF programme</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <span id="sf-count" style="font-size:12px;color:var(--muted);">Loading...</span>
+        <button class="btn-filter" style="padding:5px 12px;font-size:12px;" onclick="loadSFColleges()">Apply</button>
+      </div>
+    </div>
+    <div class="card-body table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="left">Name of College</th>
+            <th class="left">Address</th>
+            <th class="left">Project Name</th>
+            <th class="left">QP</th>
+            <th class="left">Centre Name</th>
+          </tr>
+        </thead>
+        <tbody id="sf-tbody">
+          <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>{# /tab-panel sahi #}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── Charts ────────────────────────────────────────────────────────────────────
+const months = {{ mom_months|safe }};
+const labels = months.map(m => m.display);
+new Chart(document.getElementById('enrolChart'), {
+  type: 'bar', data: { labels,
+    datasets: [
+      { label: 'Target', data: months.map(m => m.enrol_target), backgroundColor: 'rgba(59,130,246,0.25)', borderColor: '#3b82f6', borderWidth: 2 },
+      { label: 'Actual', data: months.map(m => m.enrol_actual), backgroundColor: 'rgba(59,130,246,0.7)', borderColor: '#1d4ed8', borderWidth: 1 }
+    ]},
+  options: { responsive: true, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true } } }
+});
+new Chart(document.getElementById('certPlaceChart'), {
+  type: 'bar', data: { labels,
+    datasets: [
+      { label: 'Cert Target', data: months.map(m => m.cert_target), backgroundColor: 'rgba(139,92,246,0.2)', borderColor: '#8b5cf6', borderWidth: 2 },
+      { label: 'Cert Actual', data: months.map(m => m.cert_actual), backgroundColor: 'rgba(139,92,246,0.6)', borderColor: '#6d28d9', borderWidth: 1 },
+      { label: 'Place Target', data: months.map(m => m.place_target), backgroundColor: 'rgba(16,185,129,0.2)', borderColor: '#10b981', borderWidth: 2 },
+      { label: 'Place Actual', data: months.map(m => m.place_actual), backgroundColor: 'rgba(16,185,129,0.6)', borderColor: '#065f46', borderWidth: 1 }
+    ]},
+  options: { responsive: true, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true } } }
+});
+
+// ── FY selector ───────────────────────────────────────────────────────────────
+document.getElementById('fy-select').addEventListener('change', function() {
+  const url = new URL(window.location);
+  url.searchParams.set('fy', this.value);
+  {% if cluster_filter %}url.searchParams.set('cluster', '{{ cluster_filter }}');{% endif %}
+  {% if sub_cluster_filter %}url.searchParams.set('sub_cluster', '{{ sub_cluster_filter }}');{% endif %}
+  window.location = url;
+});
+
+// ── Cascade filter: BU Head → TM Name → Centre/Project/QP ───────────────────
+const buHeadSel  = document.getElementById('f-bu-head');
+const tmNameSel  = document.getElementById('f-tm-name');
+const projectSel = document.getElementById('f-project');
+const centreSel  = document.getElementById('f-centre');
+const qpSel      = document.getElementById('f-qp');
+
+function rebuildSelect(sel, items, valueFn, labelFn, currentVal) {
+  const firstOpt = sel.options[0];
+  sel.innerHTML = '';
+  sel.appendChild(firstOpt);
+  items.forEach(item => {
+    const opt = document.createElement('option');
+    opt.value = valueFn(item);
+    opt.textContent = labelFn(item);
+    if (opt.value === currentVal) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+async function updateCascade(changedField) {
+  const bu   = buHeadSel.value;
+  const tm   = tmNameSel.value;
+  const proj = projectSel.value;
+  const cid  = centreSel.value;
+
+  const params = new URLSearchParams({ bu_head: bu, tm_name: tm, project: proj, centre_id: cid });
+  // Carry forward Home-page filters from the current URL so cascading dropdowns stay scoped
+  const pageParams = new URLSearchParams(window.location.search);
+  ['cluster', 'sub_cluster'].forEach(k => {
+    const v = pageParams.get(k);
+    if (v) params.set(k, v);
+  });
+  const res = await fetch(`/api/filter-options/?${params}`);
+  const data = await res.json();
+
+  if (changedField === 'bu_head') {
+    rebuildSelect(tmNameSel,  data.tm_names,  t => t, t => t, tm);
+    rebuildSelect(projectSel, data.projects,  p => p, p => p, proj);
+    rebuildSelect(centreSel,  data.centres,   c => c.centre_id, c => c.centre_name, cid);
+    rebuildSelect(qpSel,      data.qps,       q => q, q => q, qpSel.value);
+  } else if (changedField === 'tm_name') {
+    rebuildSelect(projectSel, data.projects,  p => p, p => p, proj);
+    rebuildSelect(centreSel,  data.centres,   c => c.centre_id, c => c.centre_name, cid);
+    rebuildSelect(qpSel,      data.qps,       q => q, q => q, qpSel.value);
+  } else if (changedField === 'project') {
+    rebuildSelect(centreSel, data.centres,    c => c.centre_id, c => c.centre_name, cid);
+    rebuildSelect(qpSel,     data.qps,        q => q, q => q, qpSel.value);
+  } else if (changedField === 'centre') {
+    rebuildSelect(qpSel,     data.qps,        q => q, q => q, qpSel.value);
+    // Also sync community colleges filter
+    document.getElementById('cc-centre-filter').value = centreSel.value;
+    loadCCCategories();
+    loadCommunityColleges();
+  }
+}
+
+buHeadSel.addEventListener('change',  () => updateCascade('bu_head'));
+tmNameSel.addEventListener('change',  () => updateCascade('tm_name'));
+projectSel.addEventListener('change', () => updateCascade('project'));
+centreSel.addEventListener('change',  () => updateCascade('centre'));
+
+// ── Community Colleges loader ─────────────────────────────────────────────────
+function ratingStars(r) {
+  if (!r) return '—';
+  return '⭐ ' + parseFloat(r).toFixed(1);
+}
+
+function loadCCCategories() {
+  const centreId = document.getElementById('cc-centre-filter').value;
+  if (!centreId) {
+    // Reset category dropdown when no centre selected
+    document.getElementById('cc-category-filter').innerHTML = '<option value="">All Categories</option>';
+    return;
+  }
+  const currentCat = document.getElementById('cc-category-filter').value;
+  const params = new URLSearchParams({ centre_id: centreId });
+  fetch(`/api/community-college-categories/?${params}`)
+    .then(r => r.json())
+    .then(data => {
+      const sel = document.getElementById('cc-category-filter');
+      sel.innerHTML = '<option value="">All Categories</option>' +
+        data.categories.map(cat => `<option value="${cat}" ${cat === currentCat ? 'selected' : ''}>${cat}</option>`).join('');
+    });
+}
+
+function loadCommunityColleges() {
+  const centreId = document.getElementById('cc-centre-filter').value;
+  const category = document.getElementById('cc-category-filter').value;
+
+  // Require at least a centre to be selected
+  if (!centreId) {
+    document.getElementById('cc-count').textContent = '';
+    document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted);">👆 Please select a centre to view nearby institutes</td></tr>';
+    return;
+  }
+
+  const params = new URLSearchParams({ centre_id: centreId });
+  if (category) params.set('category', category);
+  document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+  fetch(`/api/community-colleges/?${params}`)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('cc-count').textContent = `${data.count} record${data.count !== 1 ? 's' : ''}`;
+      if (data.results.length === 0) {
+        document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">No records found for the selected filters</td></tr>';
+        return;
+      }
+      document.getElementById('cc-tbody').innerHTML = data.results.map(r => `
+        <tr>
+          <td class="left"><span class="role-badge" style="background:var(--enrol-light,#eff6ff);color:var(--enrol,#3b82f6);">${r.category || '—'}</span></td>
+          <td class="left"><strong>${r.name_place || '—'}</strong></td>
+          <td class="left" style="font-size:12px;max-width:220px;white-space:normal;">${r.address || '—'}</td>
+          <td class="left" style="font-size:12px;max-width:160px;white-space:normal;">${r.phone_hours || '—'}</td>
+          <td class="left" style="font-size:12px;">${r.centre_name || '—'}</td>
+          <td style="text-align:center;">${r.distance_km != null ? parseFloat(r.distance_km).toFixed(2) + ' km' : '—'}</td>
+          <td style="text-align:center;">${ratingStars(r.rating)}</td>
+        </tr>
+      `).join('');
+    });
+}
+
+// Centre filter in Community Colleges syncs independently too
+document.getElementById('cc-centre-filter').addEventListener('change', function() {
+  loadCCCategories();
+  loadCommunityColleges();
+});
+document.getElementById('cc-category-filter').addEventListener('change', loadCommunityColleges);
+
+// No auto-load on page init — show placeholder until user selects
+loadCommunityColleges();   // will show placeholder since no centre selected
+
+// Pre-select centre from URL if present
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const c = params.get('centre');
+  if (c) {
+    document.getElementById('cc-centre-filter').value = c;
+    loadCCCategories();
+    loadCommunityColleges();
+  }
+})();
+
+// ════════════════════════════════════════════════════════════════════════════
+// STAFFING TAB JS
+// ════════════════════════════════════════════════════════════════════════════
+
+function getStaffingFilters() {
+  return {
+    region:  document.getElementById('sf-region')?.value  || '',
+    city:    document.getElementById('sf-city')?.value    || '',
+    cluster: document.getElementById('sf-cluster')?.value || '',
+    client:  document.getElementById('sf-client')?.value  || '',
+  };
+}
+
+function staffingParams(extra = {}) {
+  const f = getStaffingFilters();
+  return new URLSearchParams({ ...f, ...extra });
+}
+
+// ── Table 1: Demand ──────────────────────────────────────────────────────────
+function loadDemand() {
+  const tbody = document.getElementById('demand-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+  fetch('/api/staffing/demand/?' + staffingParams())
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('demand-count').textContent = `${data.count} record${data.count !== 1 ? 's' : ''}`;
+      if (!data.results.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted);">No records found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = data.results.map(r => `
+        <tr>
+          <td class="left" style="font-size:12px;">${r.region || '—'}</td>
+          <td class="left" style="font-size:12px;">${r.city_location || '—'}</td>
+          <td class="left" style="font-size:12px;white-space:normal;max-width:160px;">${r.industrial_estate_cluster || '—'}</td>
+          <td class="left"><strong style="font-size:12px;">${r.existing_client || '—'}</strong>
+            ${r.new_existing ? `<br><span class="demand-badge ${(r.new_existing||'').toLowerCase()}">${r.new_existing}</span>` : ''}
+          </td>
+          <td class="left" style="font-size:12px;white-space:normal;max-width:180px;">${r.std_designation || '—'}</td>
+          <td style="text-align:center;"><span class="supply-num">${r.estimated_monthly_demand ?? '—'}</span></td>
+        </tr>`).join('');
+    }).catch(() => {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--danger);">Error loading data</td></tr>';
+    });
+}
+
+// ── Table 2: Supply ──────────────────────────────────────────────────────────
+function loadSupply() {
+  const tbody = document.getElementById('supply-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+  fetch('/api/staffing/supply/?' + staffingParams())
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('supply-count').textContent = `${data.count} record${data.count !== 1 ? 's' : ''}`;
+      if (!data.results.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">No records found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = data.results.map(r => `
+        <tr>
+          <td class="left"><strong style="font-size:12px;">${r.nearest_center || '—'}</strong></td>
+          <td class="left" style="font-size:11px;color:var(--muted);white-space:normal;max-width:140px;">${r.centre_id_ref || '—'}</td>
+          <td class="left" style="font-size:11px;white-space:normal;max-width:200px;">${r.center_address || '—'}</td>
+          <td class="left" style="font-size:12px;white-space:normal;max-width:180px;">${r.training_program_match || '—'}</td>
+          <td style="text-align:center;"><span class="supply-num">${r.estimated_monthly_supply ?? '—'}</span></td>
+        </tr>`).join('');
+    }).catch(() => {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--danger);">Error loading data</td></tr>';
+    });
+}
+
+// ── Table 3: ITI & Diploma ───────────────────────────────────────────────────
+function loadITI() {
+  const tbody = document.getElementById('iti-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+  const typeFilter = document.getElementById('iti-type-filter')?.value || '';
+  fetch('/api/staffing/iti/?' + staffingParams({ type: typeFilter }))
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('iti-count').textContent = `${data.count} record${data.count !== 1 ? 's' : ''}`;
+      if (!data.results.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">No records found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = data.results.map(r => {
+        const typeClass = (r.college_type || '').toLowerCase() === 'iti' ? 'iti' : 'diploma';
+        return `<tr>
+          <td class="left"><strong style="font-size:12px;">${r.college_name || '—'}</strong></td>
+          <td style="text-align:center;"><span class="iti-badge ${typeClass}">${r.college_type || '—'}</span></td>
+          <td class="left" style="font-size:11px;white-space:normal;max-width:220px;">${r.address || '—'}</td>
+          <td style="text-align:center;font-size:12px;">${r.rating || '—'}</td>
+          <td style="text-align:center;font-size:12px;white-space:nowrap;">${r.phone_number || '—'}</td>
+          <td class="left" style="font-size:11px;white-space:normal;max-width:160px;">${r.working_hours || '—'}</td>
+          <td class="left" style="font-size:12px;">${r.centre_name || '—'}</td>
+        </tr>`;
+      }).join('');
+    }).catch(() => {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--danger);">Error loading data</td></tr>';
+    });
+}
+
+// ── Table 4: SF Intervention Colleges ────────────────────────────────────────
+function loadSFColleges() {
+  const tbody = document.getElementById('sf-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+  fetch('/api/staffing/sf-colleges/?' + staffingParams())
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('sf-count').textContent = `${data.count} record${data.count !== 1 ? 's' : ''}`;
+      if (!data.results.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">No records found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = data.results.map(r => `
+        <tr>
+          <td class="left"><strong style="font-size:12px;">${r.name_of_college || '—'}</strong></td>
+          <td class="left" style="font-size:11px;white-space:normal;max-width:200px;">${r.address || '—'}</td>
+          <td class="left" style="font-size:12px;white-space:normal;max-width:180px;">${r.project_name || '—'}</td>
+          <td class="left"><span class="sf-badge" style="font-size:11px;">${r.qp || '—'}</span></td>
+          <td class="left" style="font-size:12px;">${r.centre_name || '—'}</td>
+        </tr>`).join('');
+    }).catch(() => {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--danger);">Error loading data</td></tr>';
+    });
+}
+
+function applyAllSahiFilters() {
+  loadDemand();
+  loadSupply();
+  loadITI();
+  loadSFColleges();
+}
+
+function clearAllSahiFilters() {
+  ['sf-region','sf-city','sf-cluster','sf-client'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  applyAllSahiFilters();
+}
+
+// Region cascade: when region changes, refresh city/cluster/client options
+const sfRegionSel = document.getElementById('sf-region');
+const sfCitySel   = document.getElementById('sf-city');
+const sfClusterSel = document.getElementById('sf-cluster');
+const sfClientSel  = document.getElementById('sf-client');
+
+function rebuildOpts(selEl, items, currentVal) {
+  if (!selEl) return;
+  const first = selEl.options[0];
+  selEl.innerHTML = '';
+  selEl.appendChild(first);
+  items.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    if (v === currentVal) opt.selected = true;
+    selEl.appendChild(opt);
+  });
+}
+
+async function cascadeStaffingFilters(changedField) {
+  const region  = sfRegionSel?.value  || '';
+  const city    = sfCitySel?.value    || '';
+  const params  = new URLSearchParams({ region, city });
+  const data    = await fetch('/api/staffing/filter-options/?' + params).then(r => r.json());
+
+  if (changedField === 'region') {
+    rebuildOpts(sfCitySel,    data.cities,    sfCitySel?.value);
+    rebuildOpts(sfClusterSel, data.clusters,  sfClusterSel?.value);
+    rebuildOpts(sfClientSel,  data.clients,   sfClientSel?.value);
+  } else if (changedField === 'city') {
+    rebuildOpts(sfClusterSel, data.clusters,  sfClusterSel?.value);
+    rebuildOpts(sfClientSel,  data.clients,   sfClientSel?.value);
+  }
+}
+
+if (sfRegionSel) sfRegionSel.addEventListener('change', () => cascadeStaffingFilters('region'));
+if (sfCitySel)   sfCitySel.addEventListener('change',   () => cascadeStaffingFilters('city'));
+
+// Auto-load staffing tables — always load on DOMContentLoaded if staffing panel is visible
+document.addEventListener('DOMContentLoaded', function() {
+  const staffingPanel = document.getElementById('panel-sahi');
+  if (staffingPanel && staffingPanel.classList.contains('active')) {
+    loadDemand();
+    loadSupply();
+    loadITI();
+    loadSFColleges();
+  }
+});
+</script>
+{% endblock %}

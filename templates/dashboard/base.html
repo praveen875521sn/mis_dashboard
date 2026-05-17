@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}MIS Dashboard{% endblock %}</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'css/mis.css' %}">
+  <style>
+    /* Nav count pills (live cluster + sub-cluster counters) */
+    .nav-count-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px; margin-right: 6px;
+      background: rgba(255,255,255,0.13); color: #fff;
+      border: 1px solid rgba(255,255,255,0.2); border-radius: 16px;
+      font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap;
+    }
+    .nav-count-pill .ncp-icon { font-size: 13px; }
+    .nav-count-pill .ncp-val  { font-size: 14px; font-weight: 800; }
+    .nav-count-pill .ncp-lbl  { font-size: 11px; opacity: .85; }
+    .nav-sep { display:inline-block; width:1px; height:18px; background:rgba(255,255,255,0.25); margin:0 8px; vertical-align:middle; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<nav class="navbar">
+  <div class="nav-brand">
+    <span class="nav-icon">📊</span>
+    <span>MIS Dashboard</span>
+  </div>
+  <div class="nav-links">
+    <span class="nav-count-pill" title="Number of Clusters{% if nav_cluster_active %} (filtered){% endif %}">
+      <span class="ncp-icon">🗂</span>
+      <span class="ncp-val" id="navCountCluster">{{ nav_cluster_count }}</span>
+      <span class="ncp-lbl">Cluster{{ nav_cluster_count|pluralize }}</span>
+    </span>
+    <span class="nav-count-pill" title="Number of Sub Clusters{% if nav_cluster_active %} in selected cluster{% endif %}">
+      <span class="ncp-icon">📍</span>
+      <span class="ncp-val" id="navCountSubCluster">{{ nav_sub_cluster_count }}</span>
+      <span class="ncp-lbl">Sub Cluster{{ nav_sub_cluster_count|pluralize }}</span>
+    </span>
+    <span class="nav-sep"></span>
+    {% with c=request.GET.cluster|default:'' sc=request.GET.sub_cluster|default:'' %}
+    {% if c or sc %}
+      {% with qs="?cluster="|add:c|add:"&sub_cluster="|add:sc %}
+      <a href="{% url 'home' %}{{ qs }}"
+         class="{% if request.resolver_match.url_name == 'home' %}active{% endif %}">🏠 Home</a>
+      <a href="{% url 'index' %}{{ qs }}"
+         class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}">📊 Employability</a>
+      <a href="{% url 'smb' %}{{ qs }}"
+         class="{% if request.resolver_match.url_name == 'smb' %}active{% endif %}">🏭 SMB</a>
+      <a href="{% url 'sahi' %}{{ qs }}"
+         class="{% if request.resolver_match.url_name == 'sahi' %}active{% endif %}">🏫 SAHI</a>
+      <a href="{% url 'sambhav' %}{{ qs }}"
+         class="{% if request.resolver_match.url_name == 'sambhav' %}active{% endif %}">🤝 Sambhav Community</a>
+      {% endwith %}
+    {% else %}
+      <a href="{% url 'home' %}"
+         class="{% if request.resolver_match.url_name == 'home' %}active{% endif %}">🏠 Home</a>
+      <a href="{% url 'index' %}"
+         class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}">📊 Employability</a>
+      <a href="{% url 'smb' %}"
+         class="{% if request.resolver_match.url_name == 'smb' %}active{% endif %}">🏭 SMB</a>
+      <a href="{% url 'sahi' %}"
+         class="{% if request.resolver_match.url_name == 'sahi' %}active{% endif %}">🏫 SAHI</a>
+      <a href="{% url 'sambhav' %}"
+         class="{% if request.resolver_match.url_name == 'sambhav' %}active{% endif %}">🤝 Sambhav Community</a>
+    {% endif %}
+    {% endwith %}
+  </div>
+</nav>
+
+<div class="container">
+  {% block content %}{% endblock %}
+</div>
+
+<script src="{% static 'js/mis.js' %}"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

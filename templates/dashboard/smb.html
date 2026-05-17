@@ -1,0 +1,483 @@
+{% extends "dashboard/base.html" %}
+{% block title %}SMB — MIS Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+    <a href="{% url 'home' %}{% if cluster_filter or sub_cluster_filter %}?cluster={{ cluster_filter }}&sub_cluster={{ sub_cluster_filter }}{% endif %}"
+       style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;color:var(--primary);text-decoration:none;margin-top:4px;white-space:nowrap;">
+      ← Back to Home
+    </a>
+    <div>
+      <div class="page-title">
+        🏭 SMB
+        {% if cluster_filter %}
+          <span style="font-size:13px;font-weight:600;background:var(--primary);color:#fff;padding:3px 10px;border-radius:20px;vertical-align:middle;margin-left:6px;">
+            📍 {{ cluster_filter }}{% if sub_cluster_filter %} › {{ sub_cluster_filter }}{% endif %}
+          </span>
+        {% endif %}
+      </div>
+      <div class="page-subtitle">NAPS Eligible QP Details · Hyperlocal Employer Outreach</div>
+    </div>
+  </div>
+</div>
+
+<!-- NAPS table is rendered AFTER the Cert Schedule (see below) -->
+
+<!-- CERT SCHEDULE TABLE -->
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-header">
+    <div>
+      <div class="card-title">📅 Cert Schedule — Month-wise Cert Target</div>
+      <div style="font-size:12px;color:var(--muted);">Centre × Course / Trade × NAPS, bucketed by Cert Start Date month</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);" id="cs-meta"></div>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="card-body" style="padding:14px 20px 6px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+    <div class="cs-filter">
+      <label>👤 BU Head</label>
+      <select id="cs-bu"><option value="">All BU Heads</option></select>
+    </div>
+    <div class="cs-filter">
+      <label>👥 TM Name</label>
+      <select id="cs-tm"><option value="">All TMs</option></select>
+    </div>
+    <div class="cs-filter">
+      <label>🏗️ Project</label>
+      <select id="cs-project"><option value="">All Projects</option></select>
+    </div>
+    <div class="cs-filter">
+      <label>⏱ Cert Window</label>
+      <select id="cs-window"><option value="">All Windows</option></select>
+    </div>
+    <div class="cs-filter">
+      <label>🏢 Centre</label>
+      <select id="cs-centre"><option value="">All Centres</option></select>
+    </div>
+    <div class="cs-filter">
+      <label>📋 QP / Course</label>
+      <select id="cs-qp"><option value="">All Courses</option></select>
+    </div>
+    <button onclick="clearCertFilters()"
+      style="padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;color:var(--muted);">✕ Clear</button>
+  </div>
+
+  <div class="card-body table-wrap" style="max-height:520px;overflow-y:auto;">
+    <table id="cs-table">
+      <thead id="cs-thead"></thead>
+      <tbody id="cs-tbody"></tbody>
+      <tfoot id="cs-tfoot"></tfoot>
+    </table>
+  </div>
+</div>
+
+<style>
+.cs-filter { display:flex; flex-direction:column; gap:5px; min-width:170px; }
+.cs-filter label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+.cs-filter select { padding:7px 10px; border:1px solid var(--border); border-radius:7px; font-size:13px; background:var(--card); color:var(--text); min-width:170px; }
+#cs-table { width:100%; border-collapse:collapse; font-size:13px; }
+#cs-table th { background:#f8fafc; padding:9px 12px; text-align:left; font-weight:700; color:var(--primary); border-bottom:2px solid var(--border); position:sticky; top:0; z-index:1; }
+#cs-table th.num, #cs-table td.num, #cs-table tfoot td.num { text-align:right; font-variant-numeric:tabular-nums; }
+#cs-table tbody td { padding:8px 12px; border-bottom:1px solid var(--border); }
+#cs-table tbody tr:hover { background:#f9fafb; }
+#cs-table tfoot td { background:#f1f5f9; font-weight:700; color:var(--primary); padding:11px 12px; border-top:2px solid var(--border); }
+.cs-empty { text-align:center; padding:30px; color:var(--muted); font-style:italic; }
+</style>
+
+<!-- NAPS TABLE (filtered by Cert Schedule centre selection) -->
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div class="card-title">📋 NAPS Eligible QP Details</div>
+      <div style="font-size:12px;color:var(--muted);">
+        QP · NAPS Eligibility · Course · Qualification · OJT
+        <span id="naps-scope-hint" style="margin-left:8px;color:var(--primary);font-weight:600;"></span>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <input id="naps-search" type="text" placeholder="Search QP / Course..."
+        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:190px;">
+      <select id="naps-eligible-filter"
+        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
+        <option value="">All</option>
+        <option value="Yes">NAPS Eligible: Yes</option>
+        <option value="No">NAPS Eligible: No</option>
+      </select>
+      <button onclick="loadNaps()"
+        style="padding:6px 14px;background:var(--primary);color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">
+        Apply
+      </button>
+      <span id="naps-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
+    </div>
+  </div>
+  <div class="card-body table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="left">QP</th>
+          <th style="text-align:center;">NAPS Eligible</th>
+          <th class="left">Course Name</th>
+          <th class="left">Course Type</th>
+          <th class="left">Sector</th>
+          <th class="left">Min. Qualification</th>
+          <th style="text-align:center;">OJT Duration</th>
+        </tr>
+      </thead>
+      <tbody id="naps-tbody">
+        <tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted);">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- HYPERLOCAL JOBS TABLE -->
+<div class="card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div class="card-title">💼 Hyperlocal Jobs — Employer Outreach</div>
+      <div style="font-size:12px;color:var(--muted);">Discovered employers near each centre — filter by centre and QP</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select id="hj-centre-filter"
+        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
+        <option value="">All Centres</option>
+        {% for c in centres %}
+          <option value="{{ c.centre_id }}">{{ c.centre_name }}</option>
+        {% endfor %}
+      </select>
+      <select id="hj-qp-filter"
+        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
+        <option value="">All QPs / Courses</option>
+        {% for q in qps %}
+          <option value="{{ q }}">{{ q }}</option>
+        {% endfor %}
+      </select>
+      <span id="hj-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
+    </div>
+  </div>
+  <div class="card-body table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Course / QP</th>
+          <th class="left">Sector</th>
+          <th class="left">Discovered Employer</th>
+          <th>Phone</th>
+          <th class="left">Employer Address</th>
+          <th class="left">Suitable Roles</th>
+          <th class="left">Centre Name</th>
+          <th>Dist (km)</th>
+          <th>Rating</th>
+          <th>NAPS</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="hj-tbody">
+        <tr><td colspan="11" style="text-align:center;padding:28px;color:var(--muted);">
+          👆 Please select a centre to view employer outreach data
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function loadNaps() {
+  const qp      = document.getElementById('naps-search').value.trim();
+  const eligible = document.getElementById('naps-eligible-filter').value;
+  // Read all Cert Schedule filter values — narrow NAPS to that scope
+  const csBu   = document.getElementById('cs-bu') ? document.getElementById('cs-bu').value : '';
+  const csTm   = document.getElementById('cs-tm') ? document.getElementById('cs-tm').value : '';
+  const csProj = document.getElementById('cs-project') ? document.getElementById('cs-project').value : '';
+  const csWin  = document.getElementById('cs-window') ? document.getElementById('cs-window').value : '';
+  const csCentreSel = document.getElementById('cs-centre');
+  const csCentreId  = csCentreSel ? csCentreSel.value : '';
+  const csCentreLabel = csCentreSel && csCentreId
+    ? (csCentreSel.options[csCentreSel.selectedIndex] || {}).text
+    : '';
+  const csQp = document.getElementById('cs-qp') ? document.getElementById('cs-qp').value : '';
+
+  const params  = new URLSearchParams();
+  // Home cluster context
+  {% if cluster_filter %}params.set('cluster', '{{ cluster_filter }}');{% endif %}
+  {% if sub_cluster_filter %}params.set('sub_cluster', '{{ sub_cluster_filter }}');{% endif %}
+  // Cert filters
+  if (csCentreId) params.set('centre_id', csCentreId);
+  if (csBu)   params.set('cs_bu_head', csBu);
+  if (csTm)   params.set('cs_tm_name', csTm);
+  if (csProj) params.set('cs_project', csProj);
+  if (csWin)  params.set('cs_cert_window', csWin);
+  if (csQp)   params.set('cs_qp', csQp);
+  // Local NAPS filters
+  if (qp)         params.set('qp', qp);
+  if (eligible)   params.set('naps_eligible', eligible);
+
+  // Update scope hint
+  const hint = document.getElementById('naps-scope-hint');
+  if (hint) {
+    let bits = [];
+    if (csCentreId) bits.push(`centre: ${csCentreLabel}`);
+    else if (csProj || csTm || csBu || csWin || csQp) {
+      if (csProj) bits.push(`project: ${csProj}`);
+      if (csWin)  bits.push(`window: ${csWin}`);
+      if (csQp)   bits.push(`course: ${csQp}`);
+    }
+    hint.textContent = bits.length ? '· scoped to ' + bits.join(' · ') : '';
+  }
+
+  document.getElementById('naps-count').textContent = '';
+  document.getElementById('naps-tbody').innerHTML =
+    '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+  fetch('/api/naps/?' + params)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('naps-count').textContent = data.count + ' record' + (data.count !== 1 ? 's' : '');
+      if (!data.results.length) {
+        document.getElementById('naps-tbody').innerHTML =
+          '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">No records found</td></tr>';
+        return;
+      }
+      document.getElementById('naps-tbody').innerHTML = data.results.map(r => {
+        const cls = r.naps_eligible === 'Yes' ? 'green' : r.naps_eligible === 'No' ? 'zero' : '';
+        return `<tr>
+          <td class="left" style="max-width:220px;white-space:normal;font-size:12px;"><strong>${r.qp||'—'}</strong></td>
+          <td style="text-align:center;"><span class="badge ${cls}">${r.naps_eligible||'—'}</span></td>
+          <td class="left" style="max-width:200px;white-space:normal;font-size:12px;">${r.course_name||'—'}</td>
+          <td class="left" style="font-size:12px;">${r.course_type||'—'}</td>
+          <td class="left" style="font-size:12px;max-width:160px;white-space:normal;">${r.sector||'—'}</td>
+          <td class="left" style="font-size:12px;max-width:160px;white-space:normal;">${r.minimum_qualification||'—'}</td>
+          <td style="text-align:center;font-size:12px;">${r.on_job_training||'—'}</td>
+        </tr>`;
+      }).join('');
+    });
+}
+document.getElementById('naps-search').addEventListener('keydown', e => { if (e.key==='Enter') loadNaps(); });
+
+let hjInteracted = false;
+function ratingStars(r) { return r ? '⭐ ' + parseFloat(r).toFixed(1) : '—'; }
+
+function loadHJ() {
+  if (!hjInteracted) {
+    document.getElementById('hj-tbody').innerHTML =
+      '<tr><td colspan="11" style="text-align:center;padding:28px;color:var(--muted);">👆 Please select a centre to view employer outreach data</td></tr>';
+    return;
+  }
+  const centreId = document.getElementById('hj-centre-filter').value;
+  const qp       = document.getElementById('hj-qp-filter').value;
+  const params   = new URLSearchParams();
+  if (centreId) params.set('centre_id', centreId);
+  if (qp)       params.set('qp', qp);
+  document.getElementById('hj-tbody').innerHTML =
+    '<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+  fetch('/api/hyperlocal-jobs/?' + params)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('hj-count').textContent = data.count + ' record' + (data.count !== 1 ? 's' : '');
+      if (!data.results.length) {
+        document.getElementById('hj-tbody').innerHTML =
+          '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--muted);">No records found</td></tr>';
+        return;
+      }
+      document.getElementById('hj-tbody').innerHTML = data.results.map(r => {
+        const nc = r.naps_eligible === 'Yes' ? 'green' : 'zero';
+        const sc = r.outreach_status === 'done' ? 'green' : r.outreach_status === 'pending' ? 'amber' : 'zero';
+        return `<tr>
+          <td class="left" style="font-size:12px;max-width:160px;white-space:normal;"><strong>${r.course||'—'}</strong></td>
+          <td class="left" style="font-size:12px;">${r.sector||'—'}</td>
+          <td class="left"><strong>${r.discovered_employer||'—'}</strong></td>
+          <td style="font-size:12px;white-space:nowrap;">${r.phone||'—'}</td>
+          <td class="left" style="font-size:12px;max-width:200px;white-space:normal;">${r.employer_address||'—'}</td>
+          <td class="left" style="font-size:12px;max-width:160px;white-space:normal;">${r.suitable_roles||'—'}</td>
+          <td class="left" style="font-size:12px;">${r.centre_name||'—'}</td>
+          <td style="text-align:center;">${r.distance_km!=null ? parseFloat(r.distance_km).toFixed(2) : '—'}</td>
+          <td style="text-align:center;">${ratingStars(r.rating)}</td>
+          <td style="text-align:center;"><span class="badge ${nc}">${r.naps_eligible||'—'}</span></td>
+          <td style="text-align:center;"><span class="badge ${sc}">${r.outreach_status||'—'}</span></td>
+        </tr>`;
+      }).join('');
+    });
+}
+document.getElementById('hj-centre-filter').addEventListener('change', () => { hjInteracted = true; loadHJ(); });
+document.getElementById('hj-qp-filter').addEventListener('change', loadHJ);
+loadNaps();
+
+// ───────── CERT SCHEDULE ─────────
+function csEsc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function csFmt(n) { return (n === null || n === undefined || n === 0) ? '·' : Number(n).toLocaleString('en-IN'); }
+function csFmtTotal(n) { return Number(n || 0).toLocaleString('en-IN'); }
+
+function csBuildParams() {
+  const p = new URLSearchParams();
+  const bu = document.getElementById('cs-bu').value;
+  const tm = document.getElementById('cs-tm').value;
+  const pr = document.getElementById('cs-project').value;
+  const cw = document.getElementById('cs-window').value;
+  const ce = document.getElementById('cs-centre').value;
+  const qp = document.getElementById('cs-qp').value;
+  if (bu) p.set('bu_head', bu);
+  if (tm) p.set('tm_name', tm);
+  if (pr) p.set('project', pr);
+  if (cw) p.set('cert_window', cw);
+  if (ce) p.set('centre_id', ce);
+  if (qp) p.set('qp', qp);
+  // Forward Home filters
+  {% if cluster_filter %}p.set('cluster', '{{ cluster_filter }}');{% endif %}
+  {% if sub_cluster_filter %}p.set('sub_cluster', '{{ sub_cluster_filter }}');{% endif %}
+  return p;
+}
+
+function csSetSelect(id, values, isObj) {
+  const sel = document.getElementById(id);
+  const cur = sel.value;
+  const placeholder = sel.options.length ? sel.options[0].outerHTML : '';
+  sel.innerHTML = placeholder;
+  values.forEach(v => {
+    const o = document.createElement('option');
+    if (isObj) { o.value = v.centre_id; o.textContent = v.centre_name; }
+    else       { o.value = v; o.textContent = v; }
+    if ((isObj ? v.centre_id : v) === cur) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function csReloadFilters() {
+  fetch('/api/smb/cert-filter-options/?' + csBuildParams().toString())
+    .then(r => r.json())
+    .then(d => {
+      // BU heads: full list, once
+      const buSel = document.getElementById('cs-bu');
+      if (buSel.options.length <= 1) csSetSelect('cs-bu', d.bu_heads);
+      csSetSelect('cs-tm',      d.tm_names);
+      csSetSelect('cs-project', d.projects);
+      csSetSelect('cs-window',  d.cert_windows);
+      csSetSelect('cs-centre',  d.centres, true);
+      csSetSelect('cs-qp',      d.qps);
+    });
+}
+
+function csLoadTable() {
+  fetch('/api/smb/cert-schedule/?' + csBuildParams().toString())
+    .then(r => r.json())
+    .then(d => {
+      const thead = document.getElementById('cs-thead');
+      const tbody = document.getElementById('cs-tbody');
+      const tfoot = document.getElementById('cs-tfoot');
+      const meta  = document.getElementById('cs-meta');
+
+      meta.textContent = `${d.row_count} rows · ${d.grand_total.toLocaleString('en-IN')} total cert target`;
+
+      if (!d.rows.length) {
+        thead.innerHTML = ''; tfoot.innerHTML = '';
+        tbody.innerHTML = '<tr><td class="cs-empty">No rows match the current filters.</td></tr>';
+        return;
+      }
+
+      // Header
+      let h = '<tr><th>Centre Name</th><th>Course / Trade</th><th style="text-align:center;">NAPS</th>';
+      d.months.forEach(m => { h += `<th class="num">${csEsc(m)}</th>`; });
+      h += '<th class="num">Total</th></tr>';
+      thead.innerHTML = h;
+
+      // Body
+      tbody.innerHTML = d.rows.map(r => {
+        let row = `<tr>
+          <td>${csEsc(r.centre_name)}</td>
+          <td>${csEsc(r.course)}</td>
+          <td style="text-align:center;"><span class="badge ${r.naps === 'Yes' ? 'green' : 'zero'}">${csEsc(r.naps || '—')}</span></td>`;
+        r.monthly.forEach(v => { row += `<td class="num">${csFmt(v)}</td>`; });
+        row += `<td class="num"><strong>${csFmtTotal(r.total)}</strong></td></tr>`;
+        return row;
+      }).join('');
+
+      // Footer
+      let f = `<tr><td colspan="3">Total</td>`;
+      d.totals_by_month.forEach(v => { f += `<td class="num">${csFmtTotal(v)}</td>`; });
+      f += `<td class="num">${csFmtTotal(d.grand_total)}</td></tr>`;
+      tfoot.innerHTML = f;
+    });
+}
+
+function csRefresh() { csReloadFilters(); csLoadTable(); }
+
+function clearCertFilters() {
+  ['cs-bu','cs-tm','cs-project','cs-window','cs-centre','cs-qp'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  csRefresh();
+  loadNaps();
+}
+
+// Cascading reset: changing a higher-level filter resets narrower ones
+document.getElementById('cs-bu').addEventListener('change', () => {
+  document.getElementById('cs-tm').value = '';
+  document.getElementById('cs-project').value = '';
+  document.getElementById('cs-window').value = '';
+  document.getElementById('cs-centre').value = '';
+  document.getElementById('cs-qp').value = '';
+  csRefresh();
+  loadNaps();
+});
+document.getElementById('cs-tm').addEventListener('change', () => {
+  document.getElementById('cs-project').value = '';
+  document.getElementById('cs-window').value = '';
+  document.getElementById('cs-centre').value = '';
+  document.getElementById('cs-qp').value = '';
+  csRefresh();
+  loadNaps();
+});
+document.getElementById('cs-project').addEventListener('change', () => {
+  document.getElementById('cs-window').value = '';
+  document.getElementById('cs-centre').value = '';
+  document.getElementById('cs-qp').value = '';
+  csRefresh();
+  loadNaps();
+});
+document.getElementById('cs-window').addEventListener('change', () => {
+  document.getElementById('cs-centre').value = '';
+  document.getElementById('cs-qp').value = '';
+  csRefresh();
+  loadNaps();
+});
+document.getElementById('cs-centre').addEventListener('change', () => {
+  document.getElementById('cs-qp').value = '';
+  csRefresh();
+  loadNaps();
+  // Sync the Hyperlocal Jobs centre filter to match the Cert Schedule centre
+  syncHJCentre();
+});
+document.getElementById('cs-qp').addEventListener('change', () => {
+  csRefresh();
+  loadNaps();
+});
+
+// ── Hyperlocal Jobs centre sync ─────────────────────────────────────────────
+// When the user picks a centre in the Cert Schedule filters, drive the
+// Hyperlocal Jobs centre filter to match it (so the user doesn't have to
+// re-pick the same centre twice).
+function syncHJCentre() {
+  const cid = document.getElementById('cs-centre').value;
+  const hjSel = document.getElementById('hj-centre-filter');
+  if (!hjSel) return;
+  // Only switch if a real centre was chosen (cleared "" → don't override)
+  if (!cid) return;
+  // Make sure the option exists in the HJ dropdown
+  let found = false;
+  for (const o of hjSel.options) { if (o.value === cid) { found = true; break; } }
+  if (!found) return;
+  if (hjSel.value !== cid) {
+    hjSel.value = cid;
+    hjInteracted = true;
+    loadHJ();
+  }
+}
+
+csRefresh();
+</script>
+{% endblock %}

@@ -1,0 +1,386 @@
+import pandas as pd
+import numpy as np
+from django.core.management.base import BaseCommand
+from dashboard.models import (Centre, BatchPlan, CertSchedule, ManpowerStaff,
+                              CommunityCollege, HyperlocalJob, NapsEligible,
+                              ClusterMaster, SambhavCommunity)
+
+
+def safe_date(val):
+    if pd.isna(val):
+        return None
+    try:
+        return pd.Timestamp(val).date()
+    except Exception:
+        return None
+
+
+def safe_int(val):
+    try:
+        if pd.isna(val):
+            return 0
+        return int(val)
+    except Exception:
+        return 0
+
+
+def safe_str(val):
+    if pd.isna(val):
+        return ''
+    return str(val).strip()
+
+
+class Command(BaseCommand):
+    help = 'Import all Excel data into the database'
+
+    def add_arguments(self, parser):
+        parser.add_argument('--data-dir', default='data', help='Directory containing Excel files (default: data/ folder in project root)')
+
+    def handle(self, *args, **options):
+        data_dir = options['data_dir']
+        self.stdout.write('Clearing existing data...')
+        ManpowerStaff.objects.all().delete()
+        BatchPlan.objects.all().delete()
+        Centre.objects.all().delete()
+        ClusterMaster.objects.all().delete()
+
+        # 0a. Load ClusterMaster (Cluster_Master_v1.xlsx → ClusterMaster table)
+        self.stdout.write('Loading Cluster_Master_v1.xlsx into ClusterMaster...')
+        try:
+            cmst = pd.read_excel(f'{data_dir}/Cluster_Master_v1.xlsx')
+            created = 0
+            for _, row in cmst.iterrows():
+                scid = safe_str(row.get('Sub Cluster ID', ''))
+                if not scid:
+                    continue
+                ClusterMaster.objects.update_or_create(
+                    sub_cluster_id=scid,
+                    defaults={
+                        'cluster':     safe_str(row.get('Cluster', '')),
+                        'sub_cluster': safe_str(row.get('Sub Cluster', '')),
+                        'state':       safe_str(row.get('State', '')),
+                        'map_url':     safe_str(row.get('Map', '')),
+                    }
+                )
+                created += 1
+            self.stdout.write(f'  {created} ClusterMaster rows loaded')
+        except FileNotFoundError:
+            self.stdout.write('  Cluster_Master_v1.xlsx not found, skipping')
+
+        # 0c. Load Sambhav Community (Sambhav_Community.xlsx → SambhavCommunity table)
+        self.stdout.write('Loading Sambhav_Community.xlsx into SambhavCommunity...')
+        SambhavCommunity.objects.all().delete()
+        try:
+            scdf = pd.read_excel(f'{data_dir}/Sambhav_Community.xlsx')
+            created = 0
+            for _, row in scdf.iterrows():
+                project = safe_str(row.get('Project', ''))
+                if not project:
+                    continue
+                SambhavCommunity.objects.create(
+                    project        = project,
+                    sub_cluster    = safe_str(row.get('Sub Cluster', '')),
+                    sub_cluster_id = safe_str(row.get('Sub Cluster ID', '')),
+                    cluster        = safe_str(row.get('Cluster', '')),
+                    location       = safe_str(row.get('Location', '')),
+                    project_brief  = safe_str(row.get('Project Brief', '')),
+                    tm             = safe_str(row.get('TM', '')),
+                )
+                created += 1
+            self.stdout.write(f'  {created} SambhavCommunity rows loaded')
+        except FileNotFoundError:
+            self.stdout.write('  Sambhav_Community.xlsx not found, skipping')
+
+        # 0b. Build centre_id → cluster mapping from Center Master.xlsx
+        # New schema: Sub Cluster ID | Cluster | Sub Cluster (replaces old Cluster Name / Sub Cluster Name)
+        self.stdout.write('Loading cluster data from Center Master.xlsx...')
+        cluster_map = {}
+        try:
+            cm = pd.read_excel(f'{data_dir}/Center Master.xlsx')
+            for _, row in cm.iterrows():
+                cid = safe_str(row.get('Centre ID', ''))
+                if cid:
+                    cluster_map[cid] = {
+                        'sub_cluster_id': safe_str(row.get('Sub Cluster ID', '')),
+                        'cluster':        safe_str(row.get('Cluster', '')),
+                        'sub_cluster':    safe_str(row.get('Sub Cluster', '')),
+                        'entity':         safe_str(row.get('Entity', '')),
+                    }
+            self.stdout.write(f'  {len(cluster_map)} centre→cluster mappings loaded')
+        except FileNotFoundError:
+            self.stdout.write('  Center Master.xlsx not found, skipping')
+
+        # 1. Import Ops Team (Centre master)
+        self.stdout.write('Importing Centres from Ops_Team.xlsx...')
+        ops = pd.read_excel(f'{data_dir}/Ops_Team.xlsx')
+        for _, row in ops.iterrows():
+            cid = safe_str(row['Centre ID'])
+            if not cid:
+                continue
+            cm_data = cluster_map.get(cid, {})
+            Centre.objects.get_or_create(
+                centre_id=cid,
+                defaults={
+                    'centre_name':    safe_str(row['Centre Name']),
+                    'bu_head':        safe_str(row.get('BU Head', '')),
+                    'pmt_lead':       safe_str(row.get('PMT Lead', '')),
+                    'tm_name':        safe_str(row.get('TM Name', '')),
+                    'sub_cluster_id': cm_data.get('sub_cluster_id', ''),
+                    'cluster':        cm_data.get('cluster', ''),
+                    'sub_cluster':    cm_data.get('sub_cluster', ''),
+                    'entity':         cm_data.get('entity', ''),
+                }
+            )
+        self.stdout.write(f'  {Centre.objects.count()} centres loaded')
+
+        # Also ensure all centre IDs from Batch_Plan_New and Manpower exist
+        bp_raw = pd.read_excel(f'{data_dir}/Batch_Plan_New.xlsx')
+        mm_raw = pd.read_excel(f'{data_dir}/Manpower_Master_1.xlsx')
+
+        all_centre_ids = set()
+        for df, id_col, name_col in [
+            (bp_raw, 'Centre ID', 'Centre Name'),
+            (mm_raw, 'Centre ID', 'Center as per sahi'),
+        ]:
+            for _, row in df.iterrows():
+                cid = safe_str(row[id_col])
+                if cid and not Centre.objects.filter(centre_id=cid).exists():
+                    cm_data = cluster_map.get(cid, {})
+                    Centre.objects.get_or_create(
+                        centre_id=cid,
+                        defaults={'centre_name': safe_str(row.get(name_col, cid)), **cm_data}
+                    )
+        self.stdout.write(f'  Total centres: {Centre.objects.count()}')
+
+        # 2. Import Batch Plan (new format) — actuals now live on the batch row
+        self.stdout.write('Importing Batch Plan (Batch_Plan_New.xlsx)...')
+        created = 0
+        # Tolerate header variants: leading spaces in 'Final ... Planned' columns,
+        # singular 'Sub Project name ', etc.
+        def col(row, *names):
+            for n in names:
+                if n in row.index:
+                    return row[n]
+            return None
+
+        for _, row in bp_raw.iterrows():
+            cid = safe_str(row['Centre ID'])
+            bid = safe_str(row['Batch ID'])
+            if not bid or not cid:
+                continue
+            try:
+                centre = Centre.objects.get(centre_id=cid)
+            except Centre.DoesNotExist:
+                continue
+            BatchPlan.objects.update_or_create(
+                batch_id=bid,
+                defaults={
+                    'centre': centre,
+                    'centre_name':         safe_str(row['Centre Name']),
+                    'qp':                  safe_str(col(row, 'QP Name', 'QP')),
+                    'project_name':        safe_str(col(row, 'Project Name(SAHI)', 'Project Name')),
+                    'sub_project_name':    safe_str(col(row, 'Sub Project name ', 'Sub Project name')),
+                    'projects_fy':         safe_str(col(row, 'Projects_FY')),
+
+                    # Planned dates
+                    'batch_planned_start_date':         safe_date(col(row, 'Batch_Planned_Start_Date', 'Batch Planned Start Date')),
+                    'certification_planned_start_date': safe_date(col(row, 'Certification_Start_Date',  'Certification Planned  Start Date')),
+                    'placement_planned_end_date':       safe_date(col(row, 'Placement_End_Date',         'Placement Planned End Date')),
+
+                    # Actual dates
+                    'batch_actual_start_date':              safe_date(col(row, 'Batch Actual Start Date')),
+                    'assessment_actual_certification_date': safe_date(col(row, 'Assessment Actual Certification Date')),
+                    'placed_date':                          safe_date(col(row, 'Placed Date')),
+
+                    # Targets
+                    'final_enrolment_planned':     safe_int(col(row, '   Final Enrolment Planned',    'Final Enrolment Planned')),
+                    'final_certification_planned': safe_int(col(row, '   Final Certification Planned','Final Certification Planned')),
+                    'final_placement_planned':     safe_int(col(row, '   Final Placement Planned',   'Final Placement Planned')),
+
+                    # FY 26-27 actuals (Q1A: trusted source)
+                    'on_going': safe_int(col(row, 'On Going')),
+                    'fy_e_act': safe_int(col(row, 'FY 26-27 E Act')),
+                    'fy_c_act': safe_int(col(row, 'FY 26-27 C Act')),
+                    'fy_p_act': safe_int(col(row, 'FY 26-27 P Act')),
+                }
+            )
+            created += 1
+        self.stdout.write(f'  {created} batches loaded')
+
+        # 4. Import Manpower
+        self.stdout.write('Importing Manpower...')
+        created = 0
+        for _, row in mm_raw.iterrows():
+            cid = safe_str(row['Centre ID'])
+            try:
+                centre = Centre.objects.get(centre_id=cid)
+            except Centre.DoesNotExist:
+                centre = None
+            ManpowerStaff.objects.create(
+                ecode=safe_str(row['Ecode']),
+                employee_name=safe_str(row['Employee Name']),
+                official_email=safe_str(row['Official Email ID']),
+                employee_status=safe_str(row['Employee Status']),
+                sub_project_name=safe_str(row['Sub-project Name']),
+                sub_project_code=safe_str(row['Sub Project Code']),
+                role=safe_str(row['Role as per Ops ']),
+                center_name_ops=safe_str(row['Center as per sahi']),
+                centre=centre,
+            )
+            created += 1
+        self.stdout.write(f'  {created} staff loaded')
+
+        # 5. Import Community Colleges
+        import os
+        cc_path = f'{data_dir}/Community____Colleges.xlsx'
+        if os.path.exists(cc_path):
+            self.stdout.write('Importing Community Colleges...')
+            CommunityCollege.objects.all().delete()
+            cc_raw = pd.read_excel(cc_path)
+            created = 0
+            for _, row in cc_raw.iterrows():
+                cid = safe_str(row.get('Centre ID', ''))
+                centre = None
+                try:
+                    if cid:
+                        centre = Centre.objects.get(centre_id=cid)
+                except Centre.DoesNotExist:
+                    pass
+                try:
+                    sno = int(row['S.No']) if not pd.isna(row['S.No']) else None
+                except Exception:
+                    sno = None
+                def safe_float(v):
+                    try:
+                        return float(v) if not pd.isna(v) else None
+                    except Exception:
+                        return None
+                CommunityCollege.objects.create(
+                    sno=sno,
+                    category=safe_str(row.get('Category', '')),
+                    name_place=safe_str(row.get('Name / Place', '')),
+                    address=safe_str(row.get('Address', '')),
+                    latitude=safe_float(row.get('Latitude')),
+                    longitude=safe_float(row.get('Longitude')),
+                    distance_km=safe_float(row.get('Distance (km)')),
+                    rating=safe_float(row.get('Rating')),
+                    phone_hours=safe_str(row.get('Phone / Hours', '')),
+                    centre_name=safe_str(row.get('Center Name', '')),
+                    centre=centre,
+                )
+                created += 1
+            self.stdout.write(f'  {created} community college records loaded')
+        else:
+            self.stdout.write(f'  Skipping Community Colleges (file not found: {cc_path})')
+
+        # 6. Import Hyperlocal Jobs
+        hj_path = f'{data_dir}/Hyperlocal_jobs.xlsx'
+        if os.path.exists(hj_path):
+            self.stdout.write('Importing Hyperlocal Jobs...')
+            HyperlocalJob.objects.all().delete()
+            hj_raw = pd.read_excel(hj_path)
+            created = 0
+            for _, row in hj_raw.iterrows():
+                cid = safe_str(row.get('Centre ID', ''))
+                centre = None
+                try:
+                    if cid:
+                        centre = Centre.objects.get(centre_id=cid)
+                except Centre.DoesNotExist:
+                    pass
+                def safe_float(v):
+                    try:
+                        return float(v) if not pd.isna(v) else None
+                    except Exception:
+                        return None
+                def safe_int2(v):
+                    try:
+                        return int(v) if not pd.isna(v) else None
+                    except Exception:
+                        return None
+                HyperlocalJob.objects.create(
+                    course=safe_str(row.get('Course', '')),
+                    sector=safe_str(row.get('Sector', '')),
+                    district=safe_str(row.get('District', '')),
+                    state=safe_str(row.get('State', '')),
+                    discovered_employer=safe_str(row.get('Discovered Employer', '')),
+                    phone=safe_str(row.get('Phone', '')),
+                    employer_address=safe_str(row.get('Employer Address', '')),
+                    distance_km=safe_float(row.get('Distance (km)')),
+                    rating=safe_float(row.get('Rating')),
+                    reviews=safe_int2(row.get('Reviews')),
+                    naps_eligible=safe_str(row.get('NAPS Eligible', '')),
+                    suitable_roles=safe_str(row.get('Suitable Roles', '')),
+                    outreach_status=safe_str(row.get('Outreach Status', '')),
+                    centre_name=safe_str(row.get('Centre Name', '')),
+                    centre=centre,
+                )
+                created += 1
+            self.stdout.write(f'  {created} hyperlocal job records loaded')
+        else:
+            self.stdout.write(f'  Skipping Hyperlocal Jobs (file not found: {hj_path})')
+
+        # 7. Import NAPS Eligible
+        naps_path = f'{data_dir}/NAPS Eligible.xlsx'
+        try:
+            self.stdout.write('Importing NAPS Eligible data...')
+            NapsEligible.objects.all().delete()
+            naps_df = pd.read_excel(naps_path)
+            created = 0
+            for _, row in naps_df.iterrows():
+                qp = safe_str(row.get('QP', ''))
+                if not qp:
+                    continue
+                NapsEligible.objects.create(
+                    qp=qp,
+                    naps_eligible=safe_str(row.get('NAPS Eligible', '')),
+                    course_name=safe_str(row.get('course_name', '')),
+                    course_type=safe_str(row.get('course_type', '')),
+                    sector=safe_str(row.get('sector/Industry', '')),
+                    minimum_qualification=safe_str(row.get('minimum_qualification', '')),
+                    on_job_training=safe_str(row.get('on_job_training', '')),
+                    qp_mapped=safe_str(row.get('QP mapped (yes/no)', '')),
+                )
+                created += 1
+            self.stdout.write(f'  {created} NAPS records loaded')
+        except FileNotFoundError:
+            self.stdout.write(f'  Skipping NAPS Eligible (file not found: {naps_path})')
+
+        # Import Cert Schedule
+        cs_path = f'{data_dir}/Cert_Schedule.xlsx'
+        self.stdout.write('Importing Cert Schedule...')
+        try:
+            cs_df = pd.read_excel(cs_path)
+            CertSchedule.objects.all().delete()
+            # Resolve centre_name → Centre FK
+            centre_by_name = {c.centre_name: c for c in Centre.objects.all()}
+            created = 0
+            for _, row in cs_df.iterrows():
+                bid = safe_str(row.get('Batch ID', ''))
+                cname = safe_str(row.get('Centre Name', ''))
+                if not bid and not cname:
+                    continue
+                CertSchedule.objects.create(
+                    batch_id         = bid,
+                    centre_name      = cname,
+                    centre           = centre_by_name.get(cname),
+                    sub_cluster      = safe_str(row.get('Sub Cluster', '')),
+                    cluster          = safe_str(row.get('Cluster', '')),
+                    course_trade     = safe_str(row.get('Course / Trade', '')),
+                    project          = safe_str(row.get('Project', '')),
+                    cert_start_date  = safe_date(row.get('Cert Start Date')),
+                    days_to_cert     = safe_int(row.get('Days to Cert', 0)) or None,
+                    cert_window      = safe_str(row.get('Cert Window', '')),
+                    cert_target      = safe_int(row.get('Cert Target', 0)),
+                    placement_target = safe_int(row.get('Placement Target', 0)),
+                    naps             = safe_str(row.get('NAPS', '')),
+                    nats             = safe_str(row.get('NATS', '')),
+                    dbt              = safe_str(row.get('DBT', '')),
+                    verify_flag      = safe_str(row.get('Verify Flag', '')),
+                )
+                created += 1
+            self.stdout.write(f'  {created} Cert Schedule records loaded')
+        except FileNotFoundError:
+            self.stdout.write(f'  Skipping Cert Schedule (file not found: {cs_path})')
+
+        self.stdout.write(self.style.SUCCESS('Import complete!'))

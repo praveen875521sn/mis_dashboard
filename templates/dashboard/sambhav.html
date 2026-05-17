@@ -1,0 +1,71 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Sambhav Community — MIS Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+    <a href="{% url 'home' %}{% if cluster_filter or sub_cluster_filter %}?cluster={{ cluster_filter }}&sub_cluster={{ sub_cluster_filter }}{% endif %}"
+       style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;color:var(--primary);text-decoration:none;margin-top:4px;white-space:nowrap;">
+      ← Back to Home
+    </a>
+    <div>
+      <div class="page-title">🤝 Sambhav Community</div>
+      <div class="page-subtitle">Community projects · Solar, kitchen, health camps, school infrastructure</div>
+    </div>
+  </div>
+</div>
+
+<div class="summary-cards">
+  <div class="summary-card"><div class="label">Total Locations</div><div class="value">{{ total }}</div></div>
+  <div class="summary-card enrol"><div class="label">Distinct Projects</div><div class="value">{{ projects }}</div></div>
+  {% if cluster_filter %}
+  <div class="summary-card cert"><div class="label">Cluster</div><div class="value" style="font-size:18px;">{{ cluster_filter }}</div></div>
+  {% endif %}
+  {% if sub_cluster_filter %}
+  <div class="summary-card place"><div class="label">Sub Cluster</div><div class="value" style="font-size:14px;line-height:1.3;">{{ sub_cluster_filter }}</div></div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">📋 Projects</div>
+    <div style="font-size:12px;color:var(--muted);">{{ total }} location{{ total|pluralize }}</div>
+  </div>
+  <div class="table-wrap" style="max-height:600px;overflow-y:auto;">
+    <table class="sc-tbl">
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Cluster</th>
+          <th>Sub Cluster</th>
+          <th>Location</th>
+          <th>Project Brief</th>
+          <th>TM</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td style="font-weight:600;">{{ r.project }}</td>
+          <td>{{ r.cluster }}</td>
+          <td>{{ r.sub_cluster }}</td>
+          <td>{{ r.location }}</td>
+          <td style="font-size:12px;color:var(--muted);">{{ r.project_brief }}</td>
+          <td>{{ r.tm }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="empty">No projects found for the current filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+.sc-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+.sc-tbl thead th { background:#f8fafc; padding:11px 14px; text-align:left; font-weight:700; color:var(--primary); border-bottom:2px solid var(--border); position:sticky; top:0; z-index:1; }
+.sc-tbl tbody td { padding:10px 14px; border-bottom:1px solid var(--border); color:var(--text); vertical-align:top; }
+.sc-tbl tbody tr:hover { background:#f9fafb; }
+.empty { text-align:center; padding:30px; color:var(--muted); font-style:italic; }
+</style>
+{% endblock %}
