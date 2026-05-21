@@ -91,7 +91,8 @@ class ManpowerStaff(models.Model):
 
 class CommunityCollege(models.Model):
     sno = models.IntegerField(null=True, blank=True)
-    category = models.CharField(max_length=255, blank=True)
+    source = models.CharField(max_length=255, blank=True, db_index=True)
+    category = models.CharField(max_length=255, blank=True, db_index=True)
     name_place = models.CharField(max_length=255, blank=True)
     address = models.TextField(blank=True)
     latitude = models.FloatField(null=True, blank=True)
@@ -112,6 +113,7 @@ class HyperlocalJob(models.Model):
     district = models.CharField(max_length=255, blank=True)
     state = models.CharField(max_length=255, blank=True)
     discovered_employer = models.CharField(max_length=255, blank=True)
+    discovered_employer_id = models.CharField(max_length=50, blank=True, db_index=True)
     phone = models.CharField(max_length=100, blank=True)
     employer_address = models.TextField(blank=True)
     distance_km = models.FloatField(null=True, blank=True)
@@ -347,3 +349,79 @@ class SambhavCommunity(models.Model):
 
     def __str__(self):
         return f"{self.project} — {self.sub_cluster}"
+
+
+class NAPSData(models.Model):
+    """
+    Per-candidate NAPS data, used to build the Certification Pipeline table
+    (aggregated to one row per Batch ID).
+    Source: NAPS_Data.xlsx
+    """
+    batch_id                 = models.CharField(max_length=100, db_index=True)
+    project_name             = models.CharField(max_length=255, blank=True, db_index=True)
+    centre_name              = models.CharField(max_length=255, blank=True, db_index=True)
+    centre_id                = models.CharField(max_length=100, blank=True, db_index=True)
+    batch_actual_start_date  = models.DateField(null=True, blank=True)
+    batch_actual_end_date    = models.DateField(null=True, blank=True)
+    slab                     = models.CharField(max_length=100, blank=True)
+    candidate_id             = models.CharField(max_length=100, blank=True)
+    course_name              = models.CharField(max_length=255, blank=True)
+    qp_name                  = models.CharField(max_length=255, blank=True, db_index=True)
+    naps_eligible            = models.CharField(max_length=10, blank=True, db_index=True)
+    estimated_revenue        = models.IntegerField(default=0)
+    candidate_name           = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['batch_id', 'qp_name'])]
+
+
+class NAPSPlan(models.Model):
+    """
+    Planned NAPS certifications month-by-month per Batch.
+    Source: NAPS_Plan_FY26-27.xlsx
+    """
+    projects_fy                  = models.CharField(max_length=100, blank=True)
+    batch_id                     = models.CharField(max_length=100, db_index=True)
+    centre_name                  = models.CharField(max_length=255, blank=True, db_index=True)
+    centre_id                    = models.CharField(max_length=100, blank=True, db_index=True)
+    qp_name                      = models.CharField(max_length=255, blank=True, db_index=True)
+    naps_eligible                = models.CharField(max_length=10, blank=True, db_index=True)
+    sub_cluster_id               = models.CharField(max_length=100, blank=True)
+    cluster                      = models.CharField(max_length=255, blank=True, db_index=True)
+    sub_cluster                  = models.CharField(max_length=255, blank=True, db_index=True)
+    project_name                 = models.CharField(max_length=255, blank=True, db_index=True)
+    sub_project_name             = models.CharField(max_length=255, blank=True)
+    batch_planned_start_date     = models.DateField(null=True, blank=True)
+    certification_start_date     = models.DateField(null=True, blank=True)
+    placement_end_date           = models.DateField(null=True, blank=True)
+    final_enrolment_planned      = models.IntegerField(default=0)
+    final_certification_planned  = models.IntegerField(default=0)
+    final_placement_planned      = models.FloatField(default=0)
+    estimated_revenue            = models.IntegerField(default=0)
+
+    class Meta:
+        indexes = [models.Index(fields=['centre_id', 'qp_name'])]
+
+
+class OutreachStatus(models.Model):
+    """
+    Outreach pipeline status for each Discovered Employer found via
+    Hyperlocal job discovery. One row per employer (per centre).
+    Source: Outreach_Hyperlocal_Master.xlsx
+    """
+    discovered_employer       = models.CharField(max_length=255, blank=True)
+    discovered_employer_id    = models.CharField(max_length=50, db_index=True)
+    status                    = models.CharField(max_length=50, blank=True, db_index=True)
+    hr_name                   = models.CharField(max_length=255, blank=True)
+    email                     = models.CharField(max_length=255, blank=True)
+    hr_contact_name           = models.CharField(max_length=100, blank=True)
+    number_of_open_positions  = models.IntegerField(null=True, blank=True)
+    shortlisted               = models.IntegerField(null=True, blank=True)
+    centre_name               = models.CharField(max_length=255, blank=True)
+    centre_id                 = models.CharField(max_length=100, blank=True, db_index=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['centre_id', 'status'])]
+
+    def __str__(self):
+        return f"{self.discovered_employer_id} — {self.status}"

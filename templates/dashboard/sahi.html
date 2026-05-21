@@ -259,8 +259,11 @@ function loadDemandTable() {
 }
 
 function loadCentreTable() {
-  const cluster    = document.getElementById('cluster-select').value;
-  const subCluster = document.getElementById('sub-cluster-select').value;
+  // Use buildParams() so PRESET (?cluster=…&sub_cluster=…) is honoured on first
+  // load before the dropdowns are populated asynchronously.
+  const params    = buildParams();
+  const cluster   = params.get('cluster')     || '';
+  const subCluster= params.get('sub_cluster') || '';
 
   const t2body = document.getElementById('t2-body');
   const t2foot = document.getElementById('t2-foot');
@@ -274,7 +277,7 @@ function loadCentreTable() {
     return;
   }
 
-  fetch('/api/sahi/centre-table/?' + buildParams().toString())
+  fetch('/api/sahi/centre-table/?' + params.toString())
     .then(r => r.json())
     .then(data => {
       if (!data.mapped) {
@@ -312,8 +315,10 @@ function loadCentreTable() {
 }
 
 function loadDiplomaTable() {
-  const cluster    = document.getElementById('cluster-select').value;
-  const subCluster = document.getElementById('sub-cluster-select').value;
+  // Use buildParams() so PRESET is honoured on first load.
+  const params    = buildParams();
+  const cluster   = params.get('cluster')     || '';
+  const subCluster= params.get('sub_cluster') || '';
 
   const tbody = document.getElementById('t3-body');
   const info  = document.getElementById('t3-info');
@@ -326,7 +331,7 @@ function loadDiplomaTable() {
     return;
   }
 
-  fetch('/api/sahi/diploma-table/?' + buildParams().toString())
+  fetch('/api/sahi/diploma-table/?' + params.toString())
     .then(r => r.json())
     .then(data => {
       if (!data.mapped) {

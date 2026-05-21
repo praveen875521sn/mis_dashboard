@@ -3,7 +3,8 @@ import numpy as np
 from django.core.management.base import BaseCommand
 from dashboard.models import (Centre, BatchPlan, CertSchedule, ManpowerStaff,
                               CommunityCollege, HyperlocalJob, NapsEligible,
-                              ClusterMaster, SambhavCommunity)
+                              ClusterMaster, SambhavCommunity, NAPSData, NAPSPlan,
+                              OutreachStatus)
 
 
 def safe_date(val):
@@ -28,6 +29,26 @@ def safe_str(val):
     if pd.isna(val):
         return ''
     return str(val).strip()
+
+
+def safe_float(val):
+    try:
+        if pd.isna(val):
+            return 0.0
+        return float(val)
+    except Exception:
+        return 0.0
+
+
+def safe_int_or_none(val):
+    """Like safe_int but returns None instead of 0 for missing values —
+    so the difference between 'zero positions' and 'unknown' is preserved."""
+    try:
+        if pd.isna(val):
+            return None
+        return int(val)
+    except Exception:
+        return None
 
 
 class Command(BaseCommand):
@@ -257,6 +278,7 @@ class Command(BaseCommand):
                         return None
                 CommunityCollege.objects.create(
                     sno=sno,
+                    source=safe_str(row.get('Source', '')),
                     category=safe_str(row.get('Category', '')),
                     name_place=safe_str(row.get('Name / Place', '')),
                     address=safe_str(row.get('Address', '')),
@@ -304,6 +326,7 @@ class Command(BaseCommand):
                     district=safe_str(row.get('District', '')),
                     state=safe_str(row.get('State', '')),
                     discovered_employer=safe_str(row.get('Discovered Employer', '')),
+                    discovered_employer_id=safe_str(row.get('Discovered Employer ID', '')),
                     phone=safe_str(row.get('Phone', '')),
                     employer_address=safe_str(row.get('Employer Address', '')),
                     distance_km=safe_float(row.get('Distance (km)')),
@@ -382,5 +405,104 @@ class Command(BaseCommand):
             self.stdout.write(f'  {created} Cert Schedule records loaded')
         except FileNotFoundError:
             self.stdout.write(f'  Skipping Cert Schedule (file not found: {cs_path})')
+
+        # 8. Import NAPS Data (per-candidate; aggregated by SMB views per batch)
+        nd_path = f'{data_dir}/NAPS_Data.xlsx'
+        try:
+            self.stdout.write('Importing NAPS Data...')
+            NAPSData.objects.all().delete()
+            nd = pd.read_excel(nd_path, sheet_name='Sheet1')
+            # Strip any leading/trailing whitespace from column headers
+            nd.columns = [str(c).strip() for c in nd.columns]
+            created = 0
+            for _, row in nd.iterrows():
+                bid = safe_str(row.get('Batch ID', ''))
+                if not bid:
+                    continue
+                NAPSData.objects.create(
+                    batch_id                = bid,
+                    project_name            = safe_str(row.get('Project Name(SAHI)', '')),
+                    centre_name             = safe_str(row.get('Centre Name', '')),
+                    centre_id               = safe_str(row.get('Centre ID', '')),
+                    batch_actual_start_date = safe_date(row.get('Batch Actual Start Date')),
+                    batch_actual_end_date   = safe_date(row.get('Batch Actual End Date')),
+                    slab                    = safe_str(row.get('Slab', '')),
+                    candidate_id            = safe_str(row.get('Candidate ID', '')),
+                    course_name             = safe_str(row.get('Course Name', '')),
+                    qp_name                 = safe_str(row.get('QP Name', '')),
+                    naps_eligible           = safe_str(row.get('NAPS Eligible', '')),
+                    estimated_revenue       = safe_int(row.get('Estimated revenue')),
+                    candidate_name          = safe_str(row.get('Candidate Name', '')),
+                )
+                created += 1
+            self.stdout.write(f'  {created} NAPSData candidate rows loaded')
+        except FileNotFoundError:
+            self.stdout.write(f'  Skipping NAPS Data (file not found: {nd_path})')
+
+        # 9. Import NAPS Plan FY26-27
+        np_path = f'{data_dir}/NAPS_Plan_FY26-27.xlsx'
+        try:
+            self.stdout.write('Importing NAPS Plan FY26-27...')
+            NAPSPlan.objects.all().delete()
+            npl = pd.read_excel(np_path)
+            npl.columns = [str(c).strip() for c in npl.columns]
+            created = 0
+            for _, row in npl.iterrows():
+                bid = safe_str(row.get('Batch ID', ''))
+                if not bid:
+                    continue
+                NAPSPlan.objects.create(
+                    projects_fy                  = safe_str(row.get('Projects_FY', '')),
+                    batch_id                     = bid,
+                    centre_name                  = safe_str(row.get('Centre Name', '')),
+                    centre_id                    = safe_str(row.get('Centre ID', '')),
+                    qp_name                      = safe_str(row.get('QP Name', '')),
+                    naps_eligible                = safe_str(row.get('NAPS Eligible', '')),
+                    sub_cluster_id               = safe_str(row.get('Sub Cluster ID', '')),
+                    cluster                      = safe_str(row.get('Cluster', '')),
+                    sub_cluster                  = safe_str(row.get('Sub Cluster', '')),
+                    project_name                 = safe_str(row.get('Project Name(SAHI)', '')),
+                    sub_project_name             = safe_str(row.get('Sub Project name', '')),
+                    batch_planned_start_date     = safe_date(row.get('Batch_Planned_Start_Date')),
+                    certification_start_date     = safe_date(row.get('Certification_Start_Date')),
+                    placement_end_date           = safe_date(row.get('Placement_End_Date')),
+                    final_enrolment_planned      = safe_int(row.get('Final Enrolment Planned')),
+                    final_certification_planned  = safe_int(row.get('Final Certification Planned')),
+                    final_placement_planned      = safe_float(row.get('Final Placement Planned')),
+                    estimated_revenue            = safe_int(row.get('Estimated revenue')),
+                )
+                created += 1
+            self.stdout.write(f'  {created} NAPSPlan rows loaded')
+        except FileNotFoundError:
+            self.stdout.write(f'  Skipping NAPS Plan (file not found: {np_path})')
+
+        # 10. Import Outreach Hyperlocal Master (per-employer outreach status)
+        oh_path = f'{data_dir}/Outreach_Hyperlocal_Master.xlsx'
+        try:
+            self.stdout.write('Importing Outreach Hyperlocal Master...')
+            OutreachStatus.objects.all().delete()
+            oh = pd.read_excel(oh_path)
+            oh.columns = [str(c).strip() for c in oh.columns]
+            created = 0
+            for _, row in oh.iterrows():
+                eid = safe_str(row.get('Discovered Employer ID', ''))
+                if not eid:
+                    continue
+                OutreachStatus.objects.create(
+                    discovered_employer      = safe_str(row.get('Discovered Employer', '')),
+                    discovered_employer_id   = eid,
+                    status                   = safe_str(row.get('Status', '')),
+                    hr_name                  = safe_str(row.get('HR Name', '')),
+                    email                    = safe_str(row.get('Email', '')),
+                    hr_contact_name          = safe_str(row.get('HR Contact Name', '')),
+                    number_of_open_positions = safe_int_or_none(row.get('Number of Open Positions')),
+                    shortlisted              = safe_int_or_none(row.get('Shortlisted')),
+                    centre_name              = safe_str(row.get('Centre Name', '')),
+                    centre_id                = safe_str(row.get('Centre ID', '')),
+                )
+                created += 1
+            self.stdout.write(f'  {created} OutreachStatus rows loaded')
+        except FileNotFoundError:
+            self.stdout.write(f'  Skipping Outreach Master (file not found: {oh_path})')
 
         self.stdout.write(self.style.SUCCESS('Import complete!'))

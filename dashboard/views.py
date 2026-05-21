@@ -51,6 +51,33 @@ def get_available_fys():
     return sorted(fys, reverse=True)
 
 
+def fy_to_date_range(fy):
+    """'2026-27' → (date(2026,4,1), date(2027,3,31)). Returns (None, None) if unparseable."""
+    from datetime import date
+    try:
+        start_year = int(fy.split('-')[0])
+        return date(start_year, 4, 1), date(start_year + 1, 3, 31)
+    except (ValueError, AttributeError):
+        return None, None
+
+
+def filter_batchplan_by_fy(qs, fy):
+    """Return BatchPlan rows whose planned-start, actual-start, certification or
+    placement date falls within the given FY window. A batch is 'in this FY' if
+    ANY of its date fields lands in that window."""
+    from django.db.models import Q
+    start, end = fy_to_date_range(fy)
+    if not start:
+        return qs
+    cond = (
+        Q(batch_planned_start_date__gte=start,                batch_planned_start_date__lte=end) |
+        Q(batch_actual_start_date__gte=start,                 batch_actual_start_date__lte=end) |
+        Q(assessment_actual_certification_date__gte=start,    assessment_actual_certification_date__lte=end) |
+        Q(placed_date__gte=start,                             placed_date__lte=end)
+    )
+    return qs.filter(cond)
+
+
 def pct(actual, target):
     if target > 0:
         return round(actual * 100 / target)
@@ -372,53 +399,50 @@ def sub_cluster_map_api(request):
 
 def sub_cluster_coverage_api(request):
     """
-    Per-sub-cluster data-coverage matrix used by the Home page coverage table.
-    Only meaningful when a Cluster is selected (1A spec).
+    Per-sub-cluster data-coverage matrix.
 
-    Columns:
-      Sub Cluster | Employability | SMB | SAHI | Sambhav Community
+    Modes:
+      1) **Global** (no cluster filter) → totals only (for Home count cards).
+      2) **Per-cluster** (?cluster=X) → rows + totals (for coverage table).
 
-    Definitions (2A):
+    Definitions:
       Employability ✓ : ≥1 Centre exists in that sub-cluster
-      SMB           ✓ : ≥1 HyperlocalJob OR NapsEligible record reachable
+      SMB           ✓ : ≥1 HyperlocalJob OR NapsEligible-QP record reachable
                         from centres in that sub-cluster
       SAHI          ✓ : ≥1 SAHIDemand row for that sub-cluster
       Sambhav       ✓ : ≥1 SambhavCommunity row for that sub-cluster
     """
     cluster = request.GET.get('cluster', '')
-    if not cluster:
-        return JsonResponse({'rows': [], 'show': False})
 
-    # Sub-cluster universe = union of all 4 sources within this cluster
-    sc_master = set(ClusterMaster.objects.filter(cluster=cluster)
-                    .exclude(sub_cluster='').values_list('sub_cluster', flat=True))
-    sc_centre = set(Centre.objects.filter(cluster=cluster)
-                    .exclude(sub_cluster='').exclude(sub_cluster=None)
-                    .values_list('sub_cluster', flat=True))
-    sc_demand = set(SAHIDemand.objects.filter(cluster=cluster)
-                    .exclude(sub_cluster='').values_list('sub_cluster', flat=True))
-    sc_sambhav = set(SambhavCommunity.objects.filter(cluster=cluster)
-                     .exclude(sub_cluster='').values_list('sub_cluster', flat=True))
+    cm_qs      = ClusterMaster.objects.exclude(sub_cluster='')
+    centre_qs  = Centre.objects.exclude(sub_cluster='').exclude(sub_cluster=None)
+    demand_qs  = SAHIDemand.objects.exclude(sub_cluster='')
+    sambhav_qs = SambhavCommunity.objects.exclude(sub_cluster='')
+    if cluster:
+        cm_qs      = cm_qs.filter(cluster=cluster)
+        centre_qs  = centre_qs.filter(cluster=cluster)
+        demand_qs  = demand_qs.filter(cluster=cluster)
+        sambhav_qs = sambhav_qs.filter(cluster=cluster)
+
+    sc_master  = set(cm_qs.values_list('sub_cluster', flat=True))
+    sc_centre  = set(centre_qs.values_list('sub_cluster', flat=True))
+    sc_demand  = set(demand_qs.values_list('sub_cluster', flat=True))
+    sc_sambhav = set(sambhav_qs.values_list('sub_cluster', flat=True))
     sub_clusters = sorted(sc_master | sc_centre | sc_demand | sc_sambhav)
 
-    # Pre-fetch centre→sub_cluster mapping for SMB checks (one query)
-    centre_to_sc = dict(
-        Centre.objects.filter(cluster=cluster)
-        .exclude(sub_cluster='').exclude(sub_cluster=None)
-        .values_list('centre_id', 'sub_cluster')
-    )
-    # Sub-clusters with at least one HyperlocalJob centre
+    centre_to_sc = dict(centre_qs.values_list('centre_id', 'sub_cluster'))
+    centre_ids   = list(centre_to_sc.keys())
+
     hj_sub_clusters = set(
         centre_to_sc[cid] for cid in
-        HyperlocalJob.objects.filter(centre_id__in=list(centre_to_sc.keys()))
+        HyperlocalJob.objects.filter(centre_id__in=centre_ids)
         .values_list('centre_id', flat=True).distinct()
         if cid in centre_to_sc
     )
-    # Sub-clusters with at least one NAPS QP via BatchPlan → NAPS join
     naps_qps = set(NapsEligible.objects.values_list('qp', flat=True))
     naps_sub_clusters = set(
         centre_to_sc[cid] for cid in
-        BatchPlan.objects.filter(centre_id__in=list(centre_to_sc.keys()), qp__in=naps_qps)
+        BatchPlan.objects.filter(centre_id__in=centre_ids, qp__in=naps_qps)
         .values_list('centre_id', flat=True).distinct()
         if cid in centre_to_sc
     )
@@ -441,7 +465,12 @@ def sub_cluster_coverage_api(request):
         'sambhav':       sum(1 for r in rows if r['sambhav']),
     }
 
-    return JsonResponse({'rows': rows, 'totals': totals, 'show': True, 'cluster': cluster})
+    return JsonResponse({
+        'rows':    rows if cluster else [],   # rows only in per-cluster mode
+        'totals':  totals,
+        'show':    bool(cluster),
+        'cluster': cluster,
+    })
 
 
 def sambhav_view(request):
@@ -589,79 +618,67 @@ def smb_view(request):
 
 
 def naps_api(request):
+    """
+    NAPS Eligible QP Details — shows QP × NAPS Eligibility × Course details
+    for the QPs that are in scope based on the SMB main filter bar (BU/TM/
+    Project/Centre/QP) plus optional Home cluster/sub_cluster context.
+
+    QPs are derived from NAPSData (the source-of-truth for which QPs are
+    actually running in each centre/project) — same as the Certification
+    Pipeline table — so this view is consistent with what's shown above it.
+    """
     cluster      = request.GET.get('cluster', '')
     sub_cluster  = request.GET.get('sub_cluster', '')
     centre_id    = request.GET.get('centre_id', '')
-    # Cert-Schedule-side filters: narrow NAPS to QPs of the selected
-    # project / cert window / course — direct project→QP relationship, NOT
-    # "all QPs at that project's centres".
-    cs_bu_head      = request.GET.get('cs_bu_head', '')
-    cs_tm_name      = request.GET.get('cs_tm_name', '')
-    cs_project      = request.GET.get('cs_project', '')
-    cs_cert_window  = request.GET.get('cs_cert_window', '')
-    cs_qp_course    = request.GET.get('cs_qp', '')
+    cs_bu_head   = request.GET.get('cs_bu_head', '')
+    cs_tm_name   = request.GET.get('cs_tm_name', '')
+    cs_project   = request.GET.get('cs_project', '')
+    cs_qp_course = request.GET.get('cs_qp', '')
+    # cs_cert_window kept for backward-compat URLs but no longer used
+    # since the Cert Schedule table was removed.
 
-    # Start with all NAPS records
     qs = NapsEligible.objects.all()
 
-    cs_filter_active = any([cs_project, cs_cert_window, cs_qp_course])
-    scope_via_centres = any([
+    any_scope = any([
         cluster, sub_cluster, centre_id,
-        cs_bu_head, cs_tm_name,
+        cs_bu_head, cs_tm_name, cs_project, cs_qp_course
     ])
 
-    # Build the QP set in two passes:
-    # 1) If cs_project / cs_cert_window / cs_qp_course is set, the QPs come
-    #    directly from BatchPlan rows for that project (not from sibling
-    #    QPs that happen to share a centre).
-    # 2) Otherwise (centre-only or home-cluster scope), fall back to "all
-    #    QPs run at the in-scope centres".
-    qp_set = None
-    if cs_filter_active:
-        from dashboard.models import CertSchedule
-        cs_qs = CertSchedule.objects.all()
-        if cs_project:     cs_qs = cs_qs.filter(project=cs_project)
-        if cs_cert_window: cs_qs = cs_qs.filter(cert_window=cs_cert_window)
-        if cs_qp_course:   cs_qs = cs_qs.filter(course_trade=cs_qp_course)
-        # Pull QP set from the SAME project's BatchPlan rows
-        project_centre_ids = set(
-            cs_qs.exclude(centre__isnull=True)
-                 .values_list('centre__centre_id', flat=True).distinct()
-        )
-        bp_qs = BatchPlan.objects.filter(centre_id__in=project_centre_ids)
-        if cs_project:
-            bp_qs = bp_qs.filter(project_name=cs_project)
-        qp_set = set(bp_qs.exclude(qp='').values_list('qp', flat=True))
-        # If a specific centre is picked too, intersect with that centre's QPs
-        if centre_id:
-            centre_qps = set(
-                BatchPlan.objects.filter(centre_id=centre_id, project_name=cs_project)
-                .exclude(qp='').values_list('qp', flat=True)
-            ) if cs_project else set(
-                BatchPlan.objects.filter(centre_id=centre_id)
-                .exclude(qp='').values_list('qp', flat=True)
-            )
-            qp_set &= centre_qps
-
-    elif scope_via_centres:
+    if any_scope:
+        # Resolve scope filters → centre_ids universe
         centre_qs = Centre.objects.all()
-        if cluster:
-            centre_qs = centre_qs.filter(cluster=cluster)
-        if sub_cluster:
-            centre_qs = centre_qs.filter(sub_cluster=sub_cluster)
-        if cs_bu_head: centre_qs = centre_qs.filter(bu_head=cs_bu_head)
-        if cs_tm_name: centre_qs = centre_qs.filter(tm_name=cs_tm_name)
-        if centre_id: centre_qs = centre_qs.filter(centre_id=centre_id)
+        if cluster:     centre_qs = centre_qs.filter(cluster=cluster)
+        if sub_cluster: centre_qs = centre_qs.filter(sub_cluster=sub_cluster)
+        if cs_bu_head:  centre_qs = centre_qs.filter(bu_head=cs_bu_head)
+        if cs_tm_name:  centre_qs = centre_qs.filter(tm_name=cs_tm_name)
+        if centre_id:   centre_qs = centre_qs.filter(centre_id=centre_id)
         centre_ids = list(centre_qs.values_list('centre_id', flat=True))
+
+        # Pull QP set from NAPSData (consistent with Certification Pipeline)
+        from dashboard.models import NAPSData
+        nd_qs = NAPSData.objects.filter(naps_eligible__iexact='Yes')
+        if centre_ids:
+            nd_qs = nd_qs.filter(centre_id__in=centre_ids)
+        if cs_project:
+            nd_qs = nd_qs.filter(project_name=cs_project)
+        if cs_qp_course:
+            nd_qs = nd_qs.filter(qp_name=cs_qp_course)
+
         qp_set = set(
-            BatchPlan.objects.filter(centre_id__in=centre_ids)
-            .exclude(qp='').values_list('qp', flat=True)
+            nd_qs.exclude(qp_name='').values_list('qp_name', flat=True).distinct()
         )
 
-    if qp_set is not None:
-        qs = qs.filter(qp__in=qp_set)
+        # Fallback: also include BatchPlan-derived QPs for the scope
+        # (handles centres/projects that have a BatchPlan row but no NAPSData yet)
+        bp_qs = BatchPlan.objects.all()
+        if centre_ids: bp_qs = bp_qs.filter(centre_id__in=centre_ids)
+        if cs_project: bp_qs = bp_qs.filter(project_name=cs_project)
+        if cs_qp_course: bp_qs = bp_qs.filter(qp=cs_qp_course)
+        qp_set |= set(bp_qs.exclude(qp='').values_list('qp', flat=True).distinct())
 
-    # Additional search/filter params
+        qs = qs.filter(qp__in=qp_set) if qp_set else qs.none()
+
+    # Local table-level filters
     if request.GET.get('qp'):
         qs = qs.filter(qp__icontains=request.GET['qp'])
     if request.GET.get('naps_eligible'):
@@ -964,46 +981,60 @@ def filter_options_api(request):
 
 def community_colleges_api(request):
     centre_id = request.GET.get('centre_id', '')
-    category = request.GET.get('category', '')
+    category  = request.GET.get('category', '')
+    source    = request.GET.get('source', '')
     qs = CommunityCollege.objects.all()
     if centre_id:
         qs = qs.filter(centre__centre_id=centre_id)
     if category:
         qs = qs.filter(category__iexact=category)
+    if source:
+        qs = qs.filter(source__iexact=source)
     data = list(qs.values(
-        'sno', 'category', 'name_place', 'address',
+        'sno', 'source', 'category', 'name_place', 'address',
         'phone_hours', 'centre_name', 'distance_km', 'rating'
     ).order_by('distance_km'))
     return JsonResponse({'results': data, 'count': len(data)})
 
 
 def community_college_categories_api(request):
-    """Return distinct categories for the given centre (or all centres)."""
+    """Return distinct categories AND sources for the given centre (or all centres).
+    Both lists narrow when a centre is selected (and source narrows category, etc.)."""
     centre_id = request.GET.get('centre_id', '')
+    source    = request.GET.get('source', '')
     qs = CommunityCollege.objects.all()
     if centre_id:
         qs = qs.filter(centre__centre_id=centre_id)
-    categories = sorted(set(
-        qs.exclude(category='').values_list('category', flat=True)
-    ))
-    return JsonResponse({'categories': categories})
+    # Categories narrow by the selected source (if any). Sources do NOT narrow
+    # by category — they're a higher-level grouping that should always show the
+    # full list available for the current centre.
+    cat_qs = qs.filter(source__iexact=source) if source else qs
+    categories = sorted(set(cat_qs.exclude(category='').values_list('category', flat=True)))
+    sources    = sorted(set(qs.exclude(source='').values_list('source', flat=True)))
+    return JsonResponse({'categories': categories, 'sources': sources})
 
 
 # ── API: Cert Schedule (SMB) ──────────────────────────────────────────────────
 
 def smb_cert_filter_options_api(request):
-    """Cascading filter options for SMB → Cert Schedule.
+    """Cascading filter options for SMB.
 
-    Pyramid: BU Head → TM Name → Project → Cert Window → Centre → QP (Course).
+    Pyramid: BU Head → TM Name → Project → Centre → QP.
     Each filter narrows the next.
     Also respects Home filters: cluster / sub_cluster.
+
+    Projects + QPs come from the UNION of NAPSData and NAPSPlan (the same
+    sources that power the visible tables) — NOT from CertSchedule. This
+    avoids the bug where the same project is spelt slightly differently
+    across data files (e.g. CertSchedule has 'SCB_1440Nos…' while
+    NAPSData has 'SCB_1440Nos…(Non FCR)') and the picked dropdown value
+    fails to match any row.
     """
-    from dashboard.models import CertSchedule
+    from dashboard.models import NAPSData, NAPSPlan
 
     bu_head      = request.GET.get('bu_head', '')
     tm_name      = request.GET.get('tm_name', '')
     project      = request.GET.get('project', '')
-    cert_window  = request.GET.get('cert_window', '')
     centre_id    = request.GET.get('centre_id', '')
     # Home cross-filters
     cluster      = request.GET.get('cluster', '')
@@ -1014,48 +1045,53 @@ def smb_cert_filter_options_api(request):
     if cluster:     centre_qs = centre_qs.filter(cluster=cluster)
     if sub_cluster: centre_qs = centre_qs.filter(sub_cluster=sub_cluster)
     home_scope_active = bool(cluster or sub_cluster)
-
-    if bu_head:
-        centre_qs = centre_qs.filter(bu_head=bu_head)
-    if tm_name:
-        centre_qs = centre_qs.filter(tm_name=tm_name)
+    if bu_head:     centre_qs = centre_qs.filter(bu_head=bu_head)
+    if tm_name:     centre_qs = centre_qs.filter(tm_name=tm_name)
     scoped_centre_ids = list(centre_qs.values_list('centre_id', flat=True))
 
-    # Cert rows scoped by centre membership (always scope when Home filters or BU/TM are set)
+    # NAPS Data + Plan rows scoped by centre membership (use ALL when no scope set)
     if home_scope_active or bu_head or tm_name:
-        cs = CertSchedule.objects.filter(centre_id__in=scoped_centre_ids)
+        nd_qs = NAPSData.objects.filter(centre_id__in=scoped_centre_ids)
+        np_qs = NAPSPlan.objects.filter(centre_id__in=scoped_centre_ids)
     else:
-        cs = CertSchedule.objects.all()
+        nd_qs = NAPSData.objects.all()
+        np_qs = NAPSPlan.objects.all()
 
-    # Project depends on the scope (centre)
-    projects = sorted(set(cs.exclude(project='').values_list('project', flat=True)))
+    # Project = union of distinct project names across both NAPS sources
+    nd_projects = set(nd_qs.exclude(project_name='').values_list('project_name', flat=True))
+    np_projects = set(np_qs.exclude(project_name='').values_list('project_name', flat=True))
+    projects = sorted(nd_projects | np_projects)
 
-    # Cert Window depends on project too
-    win_qs = cs
-    if project: win_qs = win_qs.filter(project=project)
-    cert_windows = sorted(set(win_qs.exclude(cert_window='').values_list('cert_window', flat=True)))
+    # Narrow by project for subsequent filters
+    if project:
+        nd_qs = nd_qs.filter(project_name=project)
+        np_qs = np_qs.filter(project_name=project)
 
-    # Centre dropdown — narrows by project, cert_window
-    centre_filter_qs = cs
-    if project:     centre_filter_qs = centre_filter_qs.filter(project=project)
-    if cert_window: centre_filter_qs = centre_filter_qs.filter(cert_window=cert_window)
-    cs_centre_ids = set(centre_filter_qs.exclude(centre__isnull=True)
-                                       .values_list('centre__centre_id', flat=True).distinct())
-    centres_qs = centre_qs.filter(centre_id__in=cs_centre_ids) if cs_centre_ids \
-                 else Centre.objects.none()
+    # Centre dropdown — narrows by project. Union of centres present in either NAPS source.
+    nd_centre_ids = set(nd_qs.values_list('centre_id', flat=True))
+    np_centre_ids = set(np_qs.values_list('centre_id', flat=True))
+    naps_centre_ids = nd_centre_ids | np_centre_ids
+    if naps_centre_ids:
+        centres_qs = centre_qs.filter(centre_id__in=naps_centre_ids)
+    else:
+        centres_qs = Centre.objects.none()
     centres = list(centres_qs.values('centre_id', 'centre_name').order_by('centre_name'))
 
-    # QP / Course depends on everything above
-    qp_qs = centre_filter_qs
-    if centre_id: qp_qs = qp_qs.filter(centre__centre_id=centre_id)
-    qps = sorted(set(qp_qs.exclude(course_trade='').values_list('course_trade', flat=True)))
+    # Narrow by centre for QP filter
+    if centre_id:
+        nd_qs = nd_qs.filter(centre_id=centre_id)
+        np_qs = np_qs.filter(centre_id=centre_id)
+
+    # QP = union from both NAPS sources
+    nd_qps = set(nd_qs.exclude(qp_name='').values_list('qp_name', flat=True))
+    np_qps = set(np_qs.exclude(qp_name='').values_list('qp_name', flat=True))
+    qps = sorted(nd_qps | np_qps)
 
     # TM Names depend on bu_head + Home scope
     tm_qs = Centre.objects.all()
     if cluster:     tm_qs = tm_qs.filter(cluster=cluster)
     if sub_cluster: tm_qs = tm_qs.filter(sub_cluster=sub_cluster)
-    if bu_head:
-        tm_qs = tm_qs.filter(bu_head=bu_head)
+    if bu_head:     tm_qs = tm_qs.filter(bu_head=bu_head)
     tm_names = sorted(set(tm_qs.exclude(tm_name='').exclude(tm_name=None).values_list('tm_name', flat=True)))
 
     # BU Heads narrowed by Home scope only (top of the cascade)
@@ -1068,7 +1104,7 @@ def smb_cert_filter_options_api(request):
         'bu_heads':     bu_heads,
         'tm_names':     tm_names,
         'projects':     projects,
-        'cert_windows': cert_windows,
+        'cert_windows': [],          # kept for legacy JS compat; no longer surfaced
         'centres':      centres,
         'qps':          qps,
     })
@@ -1152,19 +1188,397 @@ def smb_cert_schedule_api(request):
     })
 
 
+# ── Helper: resolve SMB filter scope to centre_id list + qp filter ─────────────
+
+def _smb_resolve_scope(request):
+    """
+    Read the standard SMB filter set from a request and return:
+      (centre_ids: list[str] | None, qp: str, project: str)
+
+    centre_ids is None when no scoping centre filter is applied (= all
+    centres). BU Head / TM Name / Cluster / Sub Cluster / Centre are
+    resolved against Centre to yield a centre_id list.
+
+    `project` is returned as a separate filter to be applied at the
+    table level against each model's own `project_name` field (since
+    NAPSData and NAPSPlan have their own project_name columns that
+    don't always match BatchPlan's spelling).
+
+    `qp` is also a table-level filter (against qp_name).
+    """
+    bu_head     = request.GET.get('bu_head', '')
+    tm_name     = request.GET.get('tm_name', '')
+    project     = request.GET.get('project', '')
+    centre_id   = request.GET.get('centre_id', '')
+    qp          = request.GET.get('qp', '')
+    cluster     = request.GET.get('cluster', '')
+    sub_cluster = request.GET.get('sub_cluster', '')
+
+    # Build centre universe (used to translate BU/TM/cluster filters into centre_ids)
+    centre_qs = Centre.objects.all()
+    if cluster:     centre_qs = centre_qs.filter(cluster=cluster)
+    if sub_cluster: centre_qs = centre_qs.filter(sub_cluster=sub_cluster)
+    if bu_head:     centre_qs = centre_qs.filter(bu_head=bu_head)
+    if tm_name:     centre_qs = centre_qs.filter(tm_name=tm_name)
+    if centre_id:   centre_qs = centre_qs.filter(centre_id=centre_id)
+
+    centre_scope_active = bool(cluster or sub_cluster or bu_head or tm_name or centre_id)
+    if not centre_scope_active:
+        return None, qp, project
+
+    return list(centre_qs.values_list('centre_id', flat=True)), qp, project
+
+
+def _project_centre_ids(project):
+    """Return the set of centre_ids that run the given project.
+    Looks across BatchPlan, NAPSData, NAPSPlan so the answer is robust
+    even when a project name appears in only one of those tables.
+    """
+    if not project:
+        return None
+    from dashboard.models import NAPSData, NAPSPlan
+    cids = set(BatchPlan.objects.filter(project_name=project)
+               .values_list('centre_id', flat=True).distinct())
+    cids |= set(NAPSData.objects.filter(project_name=project)
+                .exclude(centre_id='').values_list('centre_id', flat=True).distinct())
+    cids |= set(NAPSPlan.objects.filter(project_name=project)
+                .exclude(centre_id='').values_list('centre_id', flat=True).distinct())
+    return cids
+
+
+
+# ── API: Certification Pipeline (aggregated from NAPSData) ────────────────────
+
+def certification_pipeline_api(request):
+    """
+    Aggregates NAPSData (per-candidate) into one row per Batch ID.
+    Only NAPS-eligible candidates are counted.
+    Supports a table-level Slab filter (table header dropdown).
+    """
+    from dashboard.models import NAPSData
+    from django.db.models import Count, Sum, Min
+
+    centre_ids, qp, project = _smb_resolve_scope(request)
+    slab = request.GET.get('slab', '')
+
+    qs = NAPSData.objects.filter(naps_eligible__iexact='Yes')
+    if centre_ids is not None:
+        qs = qs.filter(centre_id__in=centre_ids)
+    if project:
+        qs = qs.filter(project_name=project)
+    if qp:
+        qs = qs.filter(qp_name=qp)
+
+    # Snapshot the slab universe BEFORE applying the slab filter, so the
+    # dropdown stays populated even when a slab is selected.
+    available_slabs = sorted(set(
+        qs.exclude(slab='').values_list('slab', flat=True)
+    ))
+
+    if slab:
+        qs = qs.filter(slab=slab)
+
+    # Aggregate per Batch ID (slab + qp + project assumed consistent within a batch)
+    grouped = (
+        qs.values('batch_id', 'centre_name', 'centre_id', 'project_name', 'slab', 'qp_name')
+          .annotate(
+              candidate_count   = Count('id'),
+              estimated_revenue = Sum('estimated_revenue'),
+              batch_actual_start_date = Min('batch_actual_start_date'),
+              batch_actual_end_date   = Min('batch_actual_end_date'),
+          )
+          .order_by('centre_name', 'batch_id')
+    )
+
+    rows = []
+    total_candidates = 0
+    total_revenue = 0
+    for g in grouped:
+        rows.append({
+            'centre_name':             g['centre_name'],
+            'centre_id':               g['centre_id'],
+            'project_name':            g['project_name'],
+            'batch_id':                g['batch_id'],
+            'batch_actual_start_date': g['batch_actual_start_date'].strftime('%d-%b-%Y') if g['batch_actual_start_date'] else '',
+            'batch_actual_end_date':   g['batch_actual_end_date'].strftime('%d-%b-%Y') if g['batch_actual_end_date'] else '',
+            'slab':                    g['slab'],
+            'qp_name':                 g['qp_name'],
+            'candidate_count':         g['candidate_count'],
+            'estimated_revenue':       g['estimated_revenue'] or 0,
+        })
+        total_candidates += g['candidate_count']
+        total_revenue    += (g['estimated_revenue'] or 0)
+
+    return JsonResponse({
+        'rows':             rows,
+        'row_count':        len(rows),
+        'total_candidates': total_candidates,
+        'total_revenue':    total_revenue,
+        'available_slabs':  available_slabs,
+    })
+
+
+# ── API: NAPS Plan FY26-27 (month-wise) ───────────────────────────────────────
+
+def naps_plan_api(request):
+    """
+    NAPS Certification Plan — one row per (Centre, QP), with Final
+    Certification Planned counts bucketed into Apr-Mar by Certification
+    Start Date month. Total Est. Revenue is summed across all batches for
+    that (Centre + QP) combination.
+    """
+    from dashboard.models import NAPSPlan
+    from collections import defaultdict
+
+    centre_ids, qp, project = _smb_resolve_scope(request)
+
+    qs = NAPSPlan.objects.all()
+    if centre_ids is not None:
+        qs = qs.filter(centre_id__in=centre_ids)
+    if project:
+        qs = qs.filter(project_name=project)
+    if qp:
+        qs = qs.filter(qp_name=qp)
+
+    # FY months: Apr=index 0 ... Mar=index 11
+    month_to_idx = {4:0, 5:1, 6:2, 7:3, 8:4, 9:5, 10:6, 11:7, 12:8, 1:9, 2:10, 3:11}
+
+    # Group key = (centre_name, qp_name, naps_eligible)
+    groups = defaultdict(lambda: {
+        'months': [0]*12,
+        'estimated_revenue': 0,
+        'centre_id': '',
+    })
+
+    for r in qs.values(
+        'centre_name', 'centre_id', 'qp_name', 'naps_eligible',
+        'certification_start_date', 'final_certification_planned', 'estimated_revenue'
+    ):
+        key = (r['centre_name'], r['qp_name'], r['naps_eligible'])
+        bucket = groups[key]
+        bucket['centre_id'] = r['centre_id']
+        bucket['estimated_revenue'] += (r['estimated_revenue'] or 0)
+        d = r['certification_start_date']
+        if d:
+            idx = month_to_idx.get(d.month)
+            if idx is not None:
+                bucket['months'][idx] += (r['final_certification_planned'] or 0)
+
+    rows = []
+    totals_by_month = [0]*12
+    total_revenue = 0
+    fy_total = 0
+    for (centre_name, qp_name, naps_eligible), bucket in sorted(groups.items(), key=lambda x: (x[0][0], x[0][1])):
+        row_total = sum(bucket['months'])
+        rows.append({
+            'centre_name':       centre_name,
+            'centre_id':         bucket['centre_id'],
+            'qp_name':           qp_name,
+            'naps_eligible':     naps_eligible,
+            'months':            bucket['months'],
+            'row_total':         row_total,
+            'estimated_revenue': bucket['estimated_revenue'],
+        })
+        for i, v in enumerate(bucket['months']):
+            totals_by_month[i] += v
+        total_revenue += bucket['estimated_revenue']
+        fy_total += row_total
+
+    return JsonResponse({
+        'rows':            rows,
+        'row_count':       len(rows),
+        'totals_by_month': totals_by_month,
+        'fy_total':        fy_total,
+        'total_revenue':   total_revenue,
+    })
+
+
+# ── API: Outreach KPI counts (header strip cards) ────────────────────────────
+
+def outreach_kpi_api(request):
+    """
+    Returns count cards for the SMB outreach pipeline:
+      Lead Generated, Contacted, Interested, Declined, Pending,
+      Employer (distinct), Number of Open Positions.
+
+    Respects the SMB filter bar (cluster, sub_cluster, bu_head, tm_name,
+    project, centre_id, qp). Project + QP are applied via OutreachStatus's
+    join to HyperlocalJob — an employer is "in scope" for a project / QP
+    if at least one HJ record links it.
+    """
+    from dashboard.models import OutreachStatus
+    from django.db.models import Sum, Count
+
+    centre_ids, qp, project = _smb_resolve_scope(request)
+
+    qs = OutreachStatus.objects.all()
+    if centre_ids is not None:
+        qs = qs.filter(centre_id__in=centre_ids)
+    # If a Project is selected, narrow further to centres that actually
+    # run that project. (OutreachStatus has no project_name column itself,
+    # so we resolve project → centre_ids via BatchPlan/NAPSData/NAPSPlan.)
+    if project:
+        proj_cids = _project_centre_ids(project) or set()
+        qs = qs.filter(centre_id__in=proj_cids)
+
+    # If a Project or QP is selected, restrict to employers (IDs) that appear
+    # in HJ scoped to those centres + qp. We use HJ for the project lookup
+    # because OutreachStatus doesn't carry project. The project filter
+    # itself is only applied via centre narrowing (project → centres via
+    # NAPSData/NAPSPlan/HJ); we keep the QP filter explicit.
+    if qp:
+        emp_ids = set(
+            HyperlocalJob.objects
+            .filter(course=qp)
+            .exclude(discovered_employer_id='')
+            .values_list('discovered_employer_id', flat=True)
+        )
+        qs = qs.filter(discovered_employer_id__in=emp_ids)
+
+    # Status counts
+    status_counts = {row['status']: row['c'] for row in
+                     qs.values('status').annotate(c=Count('id'))}
+    employer_count = qs.values('discovered_employer_id').distinct().count()
+    open_positions_total = qs.aggregate(s=Sum('number_of_open_positions'))['s'] or 0
+    shortlisted_total    = qs.aggregate(s=Sum('shortlisted'))['s'] or 0
+
+    return JsonResponse({
+        'lead_generated':  status_counts.get('Lead Generated', 0),
+        'contacted':       status_counts.get('Contacted', 0),
+        'interested':      status_counts.get('Interested', 0),
+        'declined':        status_counts.get('Declined', 0),
+        'pending':         status_counts.get('Pending', 0),
+        'employer':        employer_count,
+        'open_positions':  open_positions_total,
+        'shortlisted':     shortlisted_total,
+    })
+
+
+# ── API: Outreach Status table ────────────────────────────────────────────────
+
+def outreach_status_table_api(request):
+    """
+    Returns one row per outreach record:
+      Discovered Employer | Status | Number of Open Positions | Shortlisted
+
+    Respects the SMB main filter bar (BU/TM/Project/Centre/QP) PLUS local
+    Centre and Status filters at the table header.
+    Default sort: by Status using natural pipeline order
+    (Lead Generated → Contacted → Interested → Declined → Pending).
+    """
+    from dashboard.models import OutreachStatus
+
+    centre_ids, qp, project = _smb_resolve_scope(request)
+
+    # Local (table-header) filters
+    local_centre  = request.GET.get('local_centre_id', '')
+    local_status  = request.GET.get('local_status', '')
+
+    qs = OutreachStatus.objects.all()
+    if centre_ids is not None:
+        qs = qs.filter(centre_id__in=centre_ids)
+    # Narrow to centres running the selected Project (via BatchPlan/NAPSData/NAPSPlan)
+    if project:
+        proj_cids = _project_centre_ids(project) or set()
+        qs = qs.filter(centre_id__in=proj_cids)
+    if local_centre:
+        qs = qs.filter(centre_id=local_centre)
+    if local_status:
+        qs = qs.filter(status=local_status)
+    if qp:
+        emp_ids = set(
+            HyperlocalJob.objects
+            .filter(course=qp)
+            .exclude(discovered_employer_id='')
+            .values_list('discovered_employer_id', flat=True)
+        )
+        qs = qs.filter(discovered_employer_id__in=emp_ids)
+
+    # Natural pipeline order for status sort
+    status_order = {
+        'Lead Generated': 1, 'Contacted': 2, 'Interested': 3,
+        'Declined': 4, 'Pending': 5
+    }
+
+    rows = list(qs.values(
+        'discovered_employer', 'discovered_employer_id', 'status',
+        'number_of_open_positions', 'shortlisted', 'centre_name', 'centre_id'
+    ))
+    rows.sort(key=lambda r: (status_order.get(r['status'], 99), r['discovered_employer']))
+
+    # Footer totals
+    total_open_positions = sum((r['number_of_open_positions'] or 0) for r in rows)
+    total_shortlisted    = sum((r['shortlisted'] or 0) for r in rows)
+
+    # Provide the distinct centres + statuses present in this scope, for
+    # populating the table-header dropdowns. We use the broader (centre/QP
+    # scoped, but ignoring local_centre/local_status) queryset so dropdowns
+    # don't collapse when a filter is already picked.
+    scope_qs = OutreachStatus.objects.all()
+    if centre_ids is not None:
+        scope_qs = scope_qs.filter(centre_id__in=centre_ids)
+    if project:
+        proj_cids = _project_centre_ids(project) or set()
+        scope_qs = scope_qs.filter(centre_id__in=proj_cids)
+    if qp:
+        scope_qs = scope_qs.filter(discovered_employer_id__in=emp_ids)
+    centres_in_scope = sorted(
+        {(r['centre_id'], r['centre_name']) for r in
+         scope_qs.values('centre_id', 'centre_name')
+         if r['centre_id']},
+        key=lambda x: x[1]
+    )
+    statuses_in_scope = sorted(
+        set(scope_qs.exclude(status='').values_list('status', flat=True)),
+        key=lambda s: status_order.get(s, 99)
+    )
+
+    return JsonResponse({
+        'rows':                  rows,
+        'row_count':             len(rows),
+        'total_open_positions':  total_open_positions,
+        'total_shortlisted':     total_shortlisted,
+        'available_centres':     [{'centre_id': c[0], 'centre_name': c[1]} for c in centres_in_scope],
+        'available_statuses':    statuses_in_scope,
+    })
+
+
 # ── API: hyperlocal jobs ──────────────────────────────────────────────────────
 
 def hyperlocal_jobs_api(request):
-    centre_id = request.GET.get('centre_id', '')
-    qp = request.GET.get('qp', '')
+    """
+    Returns Hyperlocal Jobs (discovered employers).
+
+    Accepts both the legacy single-centre filter (centre_id + qp) and the
+    new SMB main-filter set (bu_head / tm_name / project / cluster /
+    sub_cluster). The legacy centre_id overrides the main-filter scope.
+    """
+    centre_ids, qp_scope, project = _smb_resolve_scope(request)
+    local_centre = request.GET.get('centre_id', '')
+    local_qp     = request.GET.get('qp', '')
+
     qs = HyperlocalJob.objects.all()
-    if centre_id:
-        qs = qs.filter(centre__centre_id=centre_id)
+
+    # If a local centre is explicitly set, use just that. Otherwise use the
+    # main-filter scope (BU/TM/Cluster/Sub Cluster narrows centre_ids).
+    if local_centre:
+        qs = qs.filter(centre__centre_id=local_centre)
+    elif centre_ids is not None:
+        qs = qs.filter(centre__centre_id__in=centre_ids)
+
+    # Project narrowing: HJ has no project_name column, so resolve to centres
+    if project:
+        proj_cids = _project_centre_ids(project) or set()
+        qs = qs.filter(centre__centre_id__in=proj_cids)
+
+    # QP filter — local takes precedence
+    qp = local_qp or qp_scope
     if qp:
         qs = qs.filter(course__icontains=qp)
+
     data = list(qs.values(
-        'course', 'sector', 'discovered_employer', 'phone',
-        'employer_address', 'suitable_roles', 'centre_name',
+        'course', 'sector', 'discovered_employer', 'discovered_employer_id',
+        'phone', 'employer_address', 'suitable_roles', 'centre_name',
         'distance_km', 'rating', 'naps_eligible', 'outreach_status'
     ).order_by('distance_km', 'discovered_employer'))
     return JsonResponse({'results': data, 'count': len(data)})
@@ -1428,8 +1842,19 @@ def index(request):
     filtered_centre_ids = list(all_centres_qs.values_list('centre_id', flat=True))
 
     # ── Project / Centre / QP dropdowns scoped to filtered centres ────────────
-    bp_for_proj = BatchPlan.objects.filter(centre_id__in=filtered_centre_ids)
-    projects = sorted(set(bp_for_proj.exclude(project_name='').values_list('project_name', flat=True)))
+    # Project dropdown also narrows by the selected Financial Year — a project
+    # is shown only if it has at least one batch whose plan/start/cert/place
+    # date falls within the FY window. Prevents stale projects (e.g. a
+    # Feb-Mar 2026 batch) from appearing when FY 2026-27 is selected.
+    bp_for_proj    = BatchPlan.objects.filter(centre_id__in=filtered_centre_ids)
+    bp_for_proj_fy = filter_batchplan_by_fy(bp_for_proj, fy)
+    projects = sorted(set(bp_for_proj_fy.exclude(project_name='').values_list('project_name', flat=True)))
+    # If the user navigated with an explicit ?project=… that isn't in this FY
+    # (e.g. switched FY but kept the URL), still show it in the dropdown so it
+    # renders as the selected option — otherwise the user can't see what's
+    # filtering their view.
+    if project_name and project_name not in projects:
+        projects = sorted(projects + [project_name])
 
     # When a Project is selected, narrow the Centre dropdown to centres that
     # actually run that project (matches the cascading API behaviour).
@@ -1494,7 +1919,20 @@ def index(request):
             'place_target': pt, 'place_actual': pa, 'place_pct': pct(pa, pt),
         })
 
-    staff_qs = ManpowerStaff.objects.filter(centre_id__in=filtered_centre_ids)
+    # ── Manpower + Staff Status: narrow centres further when a Project is selected ──
+    # `filtered_centre_ids` is the BU/TM/cluster scope. If the user has also picked
+    # a Project, restrict to centres that actually run that project (same behaviour
+    # as the Centre dropdown). Without this, Manpower + Trainer/Mobilizer Status
+    # show staff from BU/TM-matched centres that don't run the selected project.
+    manpower_centre_ids = filtered_centre_ids
+    if project_name:
+        project_centre_ids = set(
+            BatchPlan.objects.filter(project_name=project_name)
+            .values_list('centre_id', flat=True).distinct()
+        )
+        manpower_centre_ids = [cid for cid in filtered_centre_ids if cid in project_centre_ids]
+
+    staff_qs = ManpowerStaff.objects.filter(centre_id__in=manpower_centre_ids)
     if centre_id_filter:
         staff_qs = staff_qs.filter(centre_id=centre_id_filter)
     staff_list = list(staff_qs.order_by('role', 'employee_name'))

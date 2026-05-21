@@ -17,76 +17,359 @@
           </span>
         {% endif %}
       </div>
-      <div class="page-subtitle">NAPS Eligible QP Details · Hyperlocal Employer Outreach</div>
+      <div class="page-subtitle">Certification Pipeline · NAPS Plan · Hyperlocal Employer Outreach</div>
     </div>
   </div>
 </div>
 
-<!-- NAPS table is rendered AFTER the Cert Schedule (see below) -->
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     KPI STRIP — Outreach pipeline counts. Responds to the filter bar below.
+═══════════════════════════════════════════════════════════════════════════ -->
+<div class="kpi-strip" id="outreach-kpi-strip">
+  <div class="kpi-card kpi-employer">
+    <div class="kpi-icon">🏢</div>
+    <div class="kpi-body">
+      <div class="kpi-num" id="kpi-employer">—</div>
+      <div class="kpi-lbl">Employers</div>
+    </div>
+  </div>
+  <div class="kpi-card kpi-lead">
+    <div class="kpi-icon">🎯</div>
+    <div class="kpi-body">
+      <div class="kpi-num" id="kpi-lead">—</div>
+      <div class="kpi-lbl">Lead Generated</div>
+    </div>
+  </div>
+  <div class="kpi-card kpi-contacted">
+    <div class="kpi-icon">📞</div>
+    <div class="kpi-body">
+      <div class="kpi-num" id="kpi-contacted">—</div>
+      <div class="kpi-lbl">Contacted</div>
+    </div>
+  </div>
+  <div class="kpi-card kpi-interested">
+    <div class="kpi-icon">✅</div>
+    <div class="kpi-body">
+      <div class="kpi-num" id="kpi-interested">—</div>
+      <div class="kpi-lbl">Interested</div>
+    </div>
+  </div>
+  <div class="kpi-card kpi-declined">
+    <div class="kpi-icon">❌</div>
+    <div class="kpi-body">
+      <div class="kpi-num" id="kpi-declined">—</div>
+      <div class="kpi-lbl">Declined</div>
+    </div>
+  </div>
+  <div class="kpi-card kpi-pending">
+    <div class="kpi-icon">⏳</div>
+    <div class="kpi-body">
+      <div class="kpi-num" id="kpi-pending">—</div>
+      <div class="kpi-lbl">Pending</div>
+    </div>
+  </div>
+  <div class="kpi-card kpi-positions">
+    <div class="kpi-icon">💼</div>
+    <div class="kpi-body">
+      <div class="kpi-num" id="kpi-positions">—</div>
+      <div class="kpi-lbl">Open Positions</div>
+    </div>
+  </div>
+</div>
 
-<!-- CERT SCHEDULE TABLE -->
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     FILTER BAR (Employability-style) — drives Certification Pipeline +
+     NAPS Plan + NAPS Eligible QP Details + Hyperlocal Jobs
+═══════════════════════════════════════════════════════════════════════════ -->
+<div class="card" style="margin-bottom:20px;">
+  <div class="card-body" style="padding:18px 20px;">
+    <div class="filters-grid">
+      <div class="cs-filter">
+        <label>👤 BU Head</label>
+        <select id="cs-bu"><option value="">All BU Heads</option></select>
+      </div>
+      <div class="cs-filter">
+        <label>👥 TM Name</label>
+        <select id="cs-tm"><option value="">All TMs</option></select>
+      </div>
+      <div class="cs-filter">
+        <label>🏗️ Project Name</label>
+        <select id="cs-project"><option value="">All Projects</option></select>
+      </div>
+      <div class="cs-filter">
+        <label>🏢 Centre Name</label>
+        <select id="cs-centre"><option value="">All Centres</option></select>
+      </div>
+      <div class="cs-filter">
+        <label>📋 QP</label>
+        <select id="cs-qp"><option value="">All QPs</option></select>
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:10px;">
+      <button id="cs-apply-btn" onclick="applyFilters()"
+        style="padding:9px 22px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+        Apply Filter
+      </button>
+      <button onclick="clearCertFilters()"
+        style="padding:9px 18px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;color:var(--muted);">
+        ✕ Clear
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Cert Window is no longer surfaced in the UI but kept as a hidden input to
+     avoid breaking the existing csReloadFilters/csLoadTable logic that
+     references it. Always empty string. -->
+<input type="hidden" id="cs-window" value="">
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     TABLE 1 — Certification Pipeline (aggregated from NAPS_Data.xlsx)
+═══════════════════════════════════════════════════════════════════════════ -->
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div class="card-title">🎯 Certification Pipeline on-Going</div>
+      <div style="font-size:12px;color:var(--muted);">One row per Batch — NAPS-eligible candidates ready for certification</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select id="cp-slab-filter"
+        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
+        <option value="">All Slabs</option>
+      </select>
+      <span id="cp-meta" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+  </div>
+  <div class="card-body table-wrap" style="max-height:520px;overflow-y:auto;">
+    <table id="cp-table">
+      <thead>
+        <tr>
+          <th>Centre Name</th>
+          <th>Project Name</th>
+          <th>Batch ID</th>
+          <th>Batch Start</th>
+          <th>Batch End</th>
+          <th>Slab</th>
+          <th>QP Name</th>
+          <th class="num">Candidates</th>
+          <th class="num">Estimated Revenue</th>
+        </tr>
+      </thead>
+      <tbody id="cp-tbody">
+        <tr><td colspan="9" class="cs-empty">Loading...</td></tr>
+      </tbody>
+      <tfoot id="cp-tfoot"></tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     TABLE 2 — NAPS Certification Plan FY26-27 (month-wise)
+═══════════════════════════════════════════════════════════════════════════ -->
 <div class="card" style="margin-bottom:24px;">
   <div class="card-header">
     <div>
-      <div class="card-title">📅 Cert Schedule — Month-wise Cert Target</div>
-      <div style="font-size:12px;color:var(--muted);">Centre × Course / Trade × NAPS, bucketed by Cert Start Date month</div>
+      <div class="card-title">📅 NAPS Certification Plan — FY26-27 (Month-wise)</div>
+      <div style="font-size:12px;color:var(--muted);">Per Centre × QP — planned certifications bucketed by Certification Start Date</div>
     </div>
-    <div style="font-size:12px;color:var(--muted);" id="cs-meta"></div>
+    <div style="font-size:12px;color:var(--muted);" id="np-meta"></div>
   </div>
-
-  <!-- Filter bar -->
-  <div class="card-body" style="padding:14px 20px 6px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
-    <div class="cs-filter">
-      <label>👤 BU Head</label>
-      <select id="cs-bu"><option value="">All BU Heads</option></select>
-    </div>
-    <div class="cs-filter">
-      <label>👥 TM Name</label>
-      <select id="cs-tm"><option value="">All TMs</option></select>
-    </div>
-    <div class="cs-filter">
-      <label>🏗️ Project</label>
-      <select id="cs-project"><option value="">All Projects</option></select>
-    </div>
-    <div class="cs-filter">
-      <label>⏱ Cert Window</label>
-      <select id="cs-window"><option value="">All Windows</option></select>
-    </div>
-    <div class="cs-filter">
-      <label>🏢 Centre</label>
-      <select id="cs-centre"><option value="">All Centres</option></select>
-    </div>
-    <div class="cs-filter">
-      <label>📋 QP / Course</label>
-      <select id="cs-qp"><option value="">All Courses</option></select>
-    </div>
-    <button onclick="clearCertFilters()"
-      style="padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;color:var(--muted);">✕ Clear</button>
-  </div>
-
   <div class="card-body table-wrap" style="max-height:520px;overflow-y:auto;">
-    <table id="cs-table">
-      <thead id="cs-thead"></thead>
-      <tbody id="cs-tbody"></tbody>
-      <tfoot id="cs-tfoot"></tfoot>
+    <table id="np-table">
+      <thead>
+        <tr>
+          <th>Centre Name</th>
+          <th>QP Name</th>
+          <th style="text-align:center;">NAPS Eligible</th>
+          <th class="num">Apr</th>
+          <th class="num">May</th>
+          <th class="num">Jun</th>
+          <th class="num">Jul</th>
+          <th class="num">Aug</th>
+          <th class="num">Sep</th>
+          <th class="num">Oct</th>
+          <th class="num">Nov</th>
+          <th class="num">Dec</th>
+          <th class="num">Jan</th>
+          <th class="num">Feb</th>
+          <th class="num">Mar</th>
+          <th class="num">Total Est. Revenue</th>
+        </tr>
+      </thead>
+      <tbody id="np-tbody">
+        <tr><td colspan="16" class="cs-empty">Loading...</td></tr>
+      </tbody>
+      <tfoot id="np-tfoot"></tfoot>
     </table>
   </div>
 </div>
 
 <style>
-.cs-filter { display:flex; flex-direction:column; gap:5px; min-width:170px; }
+/* Filter bar layout — Employability-style 5-column responsive grid */
+.filters-grid {
+  display:grid;
+  grid-template-columns:repeat(5, 1fr);
+  gap:14px;
+}
+@media (max-width: 1100px) { .filters-grid { grid-template-columns:repeat(3, 1fr); } }
+@media (max-width: 720px)  { .filters-grid { grid-template-columns:repeat(2, 1fr); } }
+@media (max-width: 480px)  { .filters-grid { grid-template-columns:1fr; } }
+
+.cs-filter { display:flex; flex-direction:column; gap:5px; }
 .cs-filter label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
-.cs-filter select { padding:7px 10px; border:1px solid var(--border); border-radius:7px; font-size:13px; background:var(--card); color:var(--text); min-width:170px; }
-#cs-table { width:100%; border-collapse:collapse; font-size:13px; }
-#cs-table th { background:#f8fafc; padding:9px 12px; text-align:left; font-weight:700; color:var(--primary); border-bottom:2px solid var(--border); position:sticky; top:0; z-index:1; }
-#cs-table th.num, #cs-table td.num, #cs-table tfoot td.num { text-align:right; font-variant-numeric:tabular-nums; }
-#cs-table tbody td { padding:8px 12px; border-bottom:1px solid var(--border); }
-#cs-table tbody tr:hover { background:#f9fafb; }
-#cs-table tfoot td { background:#f1f5f9; font-weight:700; color:var(--primary); padding:11px 12px; border-top:2px solid var(--border); }
+.cs-filter select {
+  padding:9px 12px; border:1px solid var(--border); border-radius:8px;
+  font-size:13px; background:var(--card); color:var(--text);
+  width:100%;
+}
+
+/* Shared styling for the two new tables (cp = Certification Pipeline, np = NAPS Plan) */
+#cp-table, #np-table, #os-table { width:100%; border-collapse:collapse; font-size:13px; }
+#cp-table th, #np-table th, #os-table th { background:#f8fafc; padding:9px 12px; text-align:left; font-weight:700; color:var(--primary); border-bottom:2px solid var(--border); position:sticky; top:0; z-index:1; white-space:nowrap; }
+#cp-table th.num, #cp-table td.num, #cp-table tfoot td.num,
+#np-table th.num, #np-table td.num, #np-table tfoot td.num,
+#os-table th.num, #os-table td.num, #os-table tfoot td.num { text-align:right; font-variant-numeric:tabular-nums; }
+#cp-table tbody td, #np-table tbody td, #os-table tbody td { padding:8px 12px; border-bottom:1px solid var(--border); }
+#cp-table tbody tr:hover, #np-table tbody tr:hover, #os-table tbody tr:hover { background:#f9fafb; }
+#cp-table tfoot td, #np-table tfoot td, #os-table tfoot td { background:#f1f5f9; font-weight:700; color:var(--primary); padding:11px 12px; border-top:2px solid var(--border); }
 .cs-empty { text-align:center; padding:30px; color:var(--muted); font-style:italic; }
+
+/* KPI strip — 7 cards in a responsive row above the filter bar */
+.kpi-strip {
+  display:grid;
+  grid-template-columns:repeat(7, 1fr);
+  gap:12px;
+  margin-bottom:22px;
+}
+.kpi-card {
+  background:var(--card); border-radius:10px; padding:14px 16px;
+  border:1px solid var(--border); box-shadow:0 1px 3px rgba(0,0,0,0.04);
+  display:flex; align-items:center; gap:11px;
+  border-left:4px solid var(--kpi-accent, var(--primary));
+}
+.kpi-card.kpi-employer    { --kpi-accent:#2563ab; }
+.kpi-card.kpi-lead        { --kpi-accent:#0ea5e9; }
+.kpi-card.kpi-contacted   { --kpi-accent:#8b5cf6; }
+.kpi-card.kpi-interested  { --kpi-accent:#16a34a; }
+.kpi-card.kpi-declined    { --kpi-accent:#dc2626; }
+.kpi-card.kpi-pending     { --kpi-accent:#f59e0b; }
+.kpi-card.kpi-positions   { --kpi-accent:#0891b2; }
+.kpi-icon { font-size:24px; line-height:1; }
+.kpi-body { display:flex; flex-direction:column; gap:1px; }
+.kpi-num  { font-size:22px; font-weight:800; color:var(--primary); line-height:1.1; font-variant-numeric:tabular-nums; }
+.kpi-lbl  { font-size:10.5px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+@media (max-width: 1300px) { .kpi-strip { grid-template-columns:repeat(4, 1fr); } }
+@media (max-width: 780px)  { .kpi-strip { grid-template-columns:repeat(2, 1fr); } }
+@media (max-width: 460px)  { .kpi-strip { grid-template-columns:1fr; } }
+
+/* Status badges */
+.status-badge {
+  display:inline-block; padding:3px 9px; border-radius:11px;
+  font-size:11px; font-weight:700; text-transform:none;
+}
+.status-badge.lead       { background:#e0f2fe; color:#075985; }
+.status-badge.contacted  { background:#ede9fe; color:#5b21b6; }
+.status-badge.interested { background:#dcfce7; color:#166534; }
+.status-badge.declined   { background:#fee2e2; color:#991b1b; }
+.status-badge.pending    { background:#fef3c7; color:#92400e; }
 </style>
 
-<!-- NAPS TABLE (filtered by Cert Schedule centre selection) -->
+<!-- NAPS TABLE moved below — see after Out Reach Status -->
+
+<!-- HYPERLOCAL JOBS TABLE -->
+<div class="card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div class="card-title">💼 Hyperlocal Jobs — Employer Outreach</div>
+      <div style="font-size:12px;color:var(--muted);">Discovered employers near each centre — filter by centre and QP</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select id="hj-centre-filter"
+        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
+        <option value="">All Centres</option>
+        {% for c in centres %}
+          <option value="{{ c.centre_id }}">{{ c.centre_name }}</option>
+        {% endfor %}
+      </select>
+      <select id="hj-qp-filter"
+        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
+        <option value="">All QPs / Courses</option>
+        {% for q in qps %}
+          <option value="{{ q }}">{{ q }}</option>
+        {% endfor %}
+      </select>
+      <span id="hj-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
+    </div>
+  </div>
+  <div class="card-body table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Course / QP</th>
+          <th class="left">Sector</th>
+          <th class="left">Discovered Employer</th>
+          <th class="left">Employer ID</th>
+          <th>Phone</th>
+          <th class="left">Employer Address</th>
+          <th class="left">Suitable Roles</th>
+          <th class="left">Centre Name</th>
+          <th>Dist (km)</th>
+          <th>Rating</th>
+          <th>NAPS</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="hj-tbody">
+        <tr><td colspan="12" style="text-align:center;padding:28px;color:var(--muted);">
+          👆 Please select a centre to view employer outreach data
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     OUT REACH STATUS TABLE — pipeline status per Discovered Employer
+═══════════════════════════════════════════════════════════════════════════ -->
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div class="card-title">📣 Out Reach Status</div>
+      <div style="font-size:12px;color:var(--muted);">Per-employer pipeline status — filter by Centre and Status</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select id="os-centre-filter"
+        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
+        <option value="">All Centres</option>
+      </select>
+      <select id="os-status-filter"
+        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
+        <option value="">All Statuses</option>
+      </select>
+      <span id="os-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
+    </div>
+  </div>
+  <div class="card-body table-wrap" style="max-height:520px;overflow-y:auto;">
+    <table id="os-table">
+      <thead>
+        <tr>
+          <th class="left">Discovered Employer</th>
+          <th style="text-align:center;">Status</th>
+          <th class="num">Open Positions</th>
+          <th class="num">Shortlisted</th>
+        </tr>
+      </thead>
+      <tbody id="os-tbody">
+        <tr><td colspan="4" class="cs-empty">Loading...</td></tr>
+      </tbody>
+      <tfoot id="os-tfoot"></tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     NAPS Eligible QP Details — moved here (was above HJ in earlier versions)
+═══════════════════════════════════════════════════════════════════════════ -->
 <div class="card" style="margin-bottom:24px;">
   <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
     <div>
@@ -127,57 +410,6 @@
       </thead>
       <tbody id="naps-tbody">
         <tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted);">Loading...</td></tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<!-- HYPERLOCAL JOBS TABLE -->
-<div class="card">
-  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-    <div>
-      <div class="card-title">💼 Hyperlocal Jobs — Employer Outreach</div>
-      <div style="font-size:12px;color:var(--muted);">Discovered employers near each centre — filter by centre and QP</div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <select id="hj-centre-filter"
-        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
-        <option value="">All Centres</option>
-        {% for c in centres %}
-          <option value="{{ c.centre_id }}">{{ c.centre_name }}</option>
-        {% endfor %}
-      </select>
-      <select id="hj-qp-filter"
-        style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);">
-        <option value="">All QPs / Courses</option>
-        {% for q in qps %}
-          <option value="{{ q }}">{{ q }}</option>
-        {% endfor %}
-      </select>
-      <span id="hj-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
-    </div>
-  </div>
-  <div class="card-body table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th class="left">Course / QP</th>
-          <th class="left">Sector</th>
-          <th class="left">Discovered Employer</th>
-          <th>Phone</th>
-          <th class="left">Employer Address</th>
-          <th class="left">Suitable Roles</th>
-          <th class="left">Centre Name</th>
-          <th>Dist (km)</th>
-          <th>Rating</th>
-          <th>NAPS</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="hj-tbody">
-        <tr><td colspan="11" style="text-align:center;padding:28px;color:var(--muted);">
-          👆 Please select a centre to view employer outreach data
-        </td></tr>
       </tbody>
     </table>
   </div>
@@ -257,29 +489,37 @@ function loadNaps() {
 }
 document.getElementById('naps-search').addEventListener('keydown', e => { if (e.key==='Enter') loadNaps(); });
 
-let hjInteracted = false;
 function ratingStars(r) { return r ? '⭐ ' + parseFloat(r).toFixed(1) : '—'; }
 
 function loadHJ() {
-  if (!hjInteracted) {
+  // Rule: Hyperlocal Jobs table shows data ONLY when the user explicitly picks
+  // a centre from the table's own local Centre dropdown (hj-centre-filter).
+  // The main filter bar's Centre Name is NOT enough — the local dropdown is
+  // populated/narrowed by the main filter (BU/TM/Project) but the user must
+  // still pick a centre here to view employer outreach data.
+  const localCentreId = document.getElementById('hj-centre-filter').value;
+  const localQp       = document.getElementById('hj-qp-filter').value;
+
+  if (!localCentreId) {
     document.getElementById('hj-tbody').innerHTML =
-      '<tr><td colspan="11" style="text-align:center;padding:28px;color:var(--muted);">👆 Please select a centre to view employer outreach data</td></tr>';
+      '<tr><td colspan="12" style="text-align:center;padding:28px;color:var(--muted);">👆 Please select a centre to view employer outreach data</td></tr>';
+    document.getElementById('hj-count').textContent = '';
     return;
   }
-  const centreId = document.getElementById('hj-centre-filter').value;
-  const qp       = document.getElementById('hj-qp-filter').value;
-  const params   = new URLSearchParams();
-  if (centreId) params.set('centre_id', centreId);
-  if (qp)       params.set('qp', qp);
+
+  const params = new URLSearchParams();
+  params.set('centre_id', localCentreId);
+  if (localQp) params.set('qp', localQp);
+
   document.getElementById('hj-tbody').innerHTML =
-    '<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
-  fetch('/api/hyperlocal-jobs/?' + params)
+    '<tr><td colspan="12" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+  fetch('/api/hyperlocal-jobs/?' + params.toString())
     .then(r => r.json())
     .then(data => {
       document.getElementById('hj-count').textContent = data.count + ' record' + (data.count !== 1 ? 's' : '');
       if (!data.results.length) {
         document.getElementById('hj-tbody').innerHTML =
-          '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--muted);">No records found</td></tr>';
+          '<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--muted);">No records found</td></tr>';
         return;
       }
       document.getElementById('hj-tbody').innerHTML = data.results.map(r => {
@@ -288,7 +528,8 @@ function loadHJ() {
         return `<tr>
           <td class="left" style="font-size:12px;max-width:160px;white-space:normal;"><strong>${r.course||'—'}</strong></td>
           <td class="left" style="font-size:12px;">${r.sector||'—'}</td>
-          <td class="left"><strong>${r.discovered_employer||'—'}</strong></td>
+          <td class="left" style="font-size:12px;max-width:160px;white-space:normal;word-break:break-word;"><strong>${r.discovered_employer||'—'}</strong></td>
+          <td class="left" style="font-size:12px;"><code style="font-size:11px;">${r.discovered_employer_id||'—'}</code></td>
           <td style="font-size:12px;white-space:nowrap;">${r.phone||'—'}</td>
           <td class="left" style="font-size:12px;max-width:200px;white-space:normal;">${r.employer_address||'—'}</td>
           <td class="left" style="font-size:12px;max-width:160px;white-space:normal;">${r.suitable_roles||'—'}</td>
@@ -301,7 +542,7 @@ function loadHJ() {
       }).join('');
     });
 }
-document.getElementById('hj-centre-filter').addEventListener('change', () => { hjInteracted = true; loadHJ(); });
+document.getElementById('hj-centre-filter').addEventListener('change', loadHJ);
 document.getElementById('hj-qp-filter').addEventListener('change', loadHJ);
 loadNaps();
 
@@ -335,6 +576,7 @@ function csBuildParams() {
 
 function csSetSelect(id, values, isObj) {
   const sel = document.getElementById(id);
+  if (!sel || sel.tagName !== 'SELECT') return;  // safety: skip hidden inputs etc.
   const cur = sel.value;
   const placeholder = sel.options.length ? sel.options[0].outerHTML : '';
   sel.innerHTML = placeholder;
@@ -356,126 +598,302 @@ function csReloadFilters() {
       if (buSel.options.length <= 1) csSetSelect('cs-bu', d.bu_heads);
       csSetSelect('cs-tm',      d.tm_names);
       csSetSelect('cs-project', d.projects);
-      csSetSelect('cs-window',  d.cert_windows);
+      // cs-window is a hidden input (we removed the Cert Window UI) — skip
       csSetSelect('cs-centre',  d.centres, true);
       csSetSelect('cs-qp',      d.qps);
+
+      // Mirror project-narrowed centre + QP list to the Hyperlocal Jobs filters
+      // so that picking a Project up top narrows the HJ Centre dropdown too.
+      syncHJDropdownOptions(d.centres, d.qps);
     });
 }
 
-function csLoadTable() {
-  fetch('/api/smb/cert-schedule/?' + csBuildParams().toString())
+// Populate the HJ Centre + QP dropdowns to match the project-narrowed list
+// coming from the Cert Schedule API. Preserves current selection if still
+// valid; otherwise clears.
+function syncHJDropdownOptions(centres, qps) {
+  const hjCentre = document.getElementById('hj-centre-filter');
+  const hjQp     = document.getElementById('hj-qp-filter');
+  if (!hjCentre || !hjQp) return;
+
+  const prevC = hjCentre.value;
+  const validCIds = new Set((centres || []).map(c => c.centre_id));
+  hjCentre.innerHTML = '<option value="">All Centres</option>' +
+    (centres || []).map(c =>
+      `<option value="${c.centre_id}" ${c.centre_id === prevC ? 'selected' : ''}>${c.centre_name}</option>`
+    ).join('');
+  // If old selection no longer in narrowed list, clear it
+  if (prevC && !validCIds.has(prevC)) hjCentre.value = '';
+
+  const prevQ = hjQp.value;
+  const validQs = new Set(qps || []);
+  hjQp.innerHTML = '<option value="">All QPs / Courses</option>' +
+    (qps || []).map(q =>
+      `<option value="${q}" ${q === prevQ ? 'selected' : ''}>${q}</option>`
+    ).join('');
+  if (prevQ && !validQs.has(prevQ)) hjQp.value = '';
+
+  // Refresh HJ to reflect the new scope (HJ itself decides if it should
+  // show data or a placeholder based on whether any scope is active)
+  loadHJ();
+}
+
+// ── Certification Pipeline (Table 1, from NAPS_Data) ───────────────────────
+function loadCertificationPipeline() {
+  const params = csBuildParams();
+  const slab = document.getElementById('cp-slab-filter').value;
+  if (slab) params.set('slab', slab);
+
+  fetch('/api/smb/certification-pipeline/?' + params.toString())
     .then(r => r.json())
     .then(d => {
-      const thead = document.getElementById('cs-thead');
-      const tbody = document.getElementById('cs-tbody');
-      const tfoot = document.getElementById('cs-tfoot');
-      const meta  = document.getElementById('cs-meta');
+      const tbody = document.getElementById('cp-tbody');
+      const tfoot = document.getElementById('cp-tfoot');
+      const meta  = document.getElementById('cp-meta');
 
-      meta.textContent = `${d.row_count} rows · ${d.grand_total.toLocaleString('en-IN')} total cert target`;
+      // Refresh slab dropdown — preserve current selection if still valid.
+      // available_slabs is the full slab universe in the current upstream
+      // scope (ignoring the slab filter itself), so the dropdown doesn't
+      // collapse when a slab is already picked.
+      const slabSel = document.getElementById('cp-slab-filter');
+      const prevSlab = slabSel.value;
+      slabSel.innerHTML = '<option value="">All Slabs</option>' +
+        (d.available_slabs || []).map(s =>
+          `<option value="${csEsc(s)}" ${s === prevSlab ? 'selected' : ''}>${csEsc(s)}</option>`
+        ).join('');
+
+      meta.textContent = `${d.row_count} batch${d.row_count === 1 ? '' : 'es'} · ${d.total_candidates.toLocaleString('en-IN')} candidates · ₹${d.total_revenue.toLocaleString('en-IN')} estimated revenue`;
 
       if (!d.rows.length) {
-        thead.innerHTML = ''; tfoot.innerHTML = '';
-        tbody.innerHTML = '<tr><td class="cs-empty">No rows match the current filters.</td></tr>';
+        tfoot.innerHTML = '';
+        tbody.innerHTML = '<tr><td colspan="9" class="cs-empty">No batches match the current filters.</td></tr>';
         return;
       }
 
-      // Header
-      let h = '<tr><th>Centre Name</th><th>Course / Trade</th><th style="text-align:center;">NAPS</th>';
-      d.months.forEach(m => { h += `<th class="num">${csEsc(m)}</th>`; });
-      h += '<th class="num">Total</th></tr>';
-      thead.innerHTML = h;
+      tbody.innerHTML = d.rows.map(r => `
+        <tr>
+          <td>${csEsc(r.centre_name)}</td>
+          <td style="font-size:12px;">${csEsc(r.project_name || '—')}</td>
+          <td><code style="font-size:12px;">${csEsc(r.batch_id)}</code></td>
+          <td>${csEsc(r.batch_actual_start_date || '—')}</td>
+          <td>${csEsc(r.batch_actual_end_date || '—')}</td>
+          <td>${csEsc(r.slab || '—')}</td>
+          <td>${csEsc(r.qp_name)}</td>
+          <td class="num">${csFmtTotal(r.candidate_count)}</td>
+          <td class="num">₹${csFmtTotal(r.estimated_revenue)}</td>
+        </tr>`).join('');
 
-      // Body
+      tfoot.innerHTML = `<tr>
+        <td colspan="7">Total — ${d.row_count} batch${d.row_count === 1 ? '' : 'es'}</td>
+        <td class="num">${csFmtTotal(d.total_candidates)}</td>
+        <td class="num">₹${csFmtTotal(d.total_revenue)}</td>
+      </tr>`;
+    });
+}
+
+// Slab dropdown change → reload pipeline (other tables unaffected)
+document.getElementById('cp-slab-filter').addEventListener('change', loadCertificationPipeline);
+
+// ── NAPS Plan FY26-27 (Table 2, from NAPS_Plan) ────────────────────────────
+function loadNapsPlan() {
+  fetch('/api/smb/naps-plan/?' + csBuildParams().toString())
+    .then(r => r.json())
+    .then(d => {
+      const tbody = document.getElementById('np-tbody');
+      const tfoot = document.getElementById('np-tfoot');
+      const meta  = document.getElementById('np-meta');
+
+      meta.textContent = `${d.row_count} row${d.row_count === 1 ? '' : 's'} · ${d.fy_total.toLocaleString('en-IN')} planned cert · ₹${d.total_revenue.toLocaleString('en-IN')} estimated revenue`;
+
+      if (!d.rows.length) {
+        tfoot.innerHTML = '';
+        tbody.innerHTML = '<tr><td colspan="16" class="cs-empty">No plan rows match the current filters.</td></tr>';
+        return;
+      }
+
       tbody.innerHTML = d.rows.map(r => {
         let row = `<tr>
           <td>${csEsc(r.centre_name)}</td>
-          <td>${csEsc(r.course)}</td>
-          <td style="text-align:center;"><span class="badge ${r.naps === 'Yes' ? 'green' : 'zero'}">${csEsc(r.naps || '—')}</span></td>`;
-        r.monthly.forEach(v => { row += `<td class="num">${csFmt(v)}</td>`; });
-        row += `<td class="num"><strong>${csFmtTotal(r.total)}</strong></td></tr>`;
+          <td>${csEsc(r.qp_name)}</td>
+          <td style="text-align:center;"><span class="badge ${r.naps_eligible === 'Yes' ? 'green' : 'zero'}">${csEsc(r.naps_eligible || '—')}</span></td>`;
+        r.months.forEach(v => { row += `<td class="num">${csFmt(v)}</td>`; });
+        row += `<td class="num"><strong>₹${csFmtTotal(r.estimated_revenue)}</strong></td></tr>`;
         return row;
       }).join('');
 
-      // Footer
       let f = `<tr><td colspan="3">Total</td>`;
       d.totals_by_month.forEach(v => { f += `<td class="num">${csFmtTotal(v)}</td>`; });
-      f += `<td class="num">${csFmtTotal(d.grand_total)}</td></tr>`;
+      f += `<td class="num">₹${csFmtTotal(d.total_revenue)}</td></tr>`;
       tfoot.innerHTML = f;
     });
 }
 
-function csRefresh() { csReloadFilters(); csLoadTable(); }
+// ── Outreach KPI strip (Lead Generated / Contacted / Interested / etc) ─────
+function loadOutreachKpi() {
+  fetch('/api/smb/outreach-kpi/?' + csBuildParams().toString())
+    .then(r => r.json())
+    .then(d => {
+      const fmt = n => Number(n || 0).toLocaleString('en-IN');
+      document.getElementById('kpi-employer').textContent    = fmt(d.employer);
+      document.getElementById('kpi-lead').textContent        = fmt(d.lead_generated);
+      document.getElementById('kpi-contacted').textContent   = fmt(d.contacted);
+      document.getElementById('kpi-interested').textContent  = fmt(d.interested);
+      document.getElementById('kpi-declined').textContent    = fmt(d.declined);
+      document.getElementById('kpi-pending').textContent     = fmt(d.pending);
+      document.getElementById('kpi-positions').textContent   = fmt(d.open_positions);
+    });
+}
+
+// ── Out Reach Status table ─────────────────────────────────────────────────
+// Same rule as Hyperlocal Jobs: shows data ONLY when the user explicitly picks
+// a centre from the table's own local Centre dropdown (os-centre-filter).
+// The local dropdown is populated/narrowed by the main filter (BU/TM/Project)
+// but the user must still pick a centre here to view outreach status data.
+function loadOutreachStatus() {
+  const localCentre = document.getElementById('os-centre-filter').value;
+  const localStatus = document.getElementById('os-status-filter').value;
+
+  // Always refresh the centre dropdown so it stays in sync with the upstream
+  // filter scope (BU/TM/Project) — even when no centre is picked yet.
+  const params = csBuildParams();
+  if (localStatus) params.set('local_status', localStatus);
+  // Note: we deliberately do NOT pass local_centre_id here, because we want
+  // the dropdown to show ALL centres in the upstream scope, not just one.
+
+  fetch('/api/smb/outreach-status/?' + params.toString())
+    .then(r => r.json())
+    .then(d => {
+      const tbody = document.getElementById('os-tbody');
+      const tfoot = document.getElementById('os-tfoot');
+      const count = document.getElementById('os-count');
+
+      // Refresh table-header dropdowns (preserve current selection if still valid)
+      const cSel = document.getElementById('os-centre-filter');
+      const sSel = document.getElementById('os-status-filter');
+      const prevC = cSel.value;
+      const prevS = sSel.value;
+      cSel.innerHTML = '<option value="">All Centres</option>' +
+        (d.available_centres || []).map(c =>
+          `<option value="${c.centre_id}" ${c.centre_id === prevC ? 'selected' : ''}>${csEsc(c.centre_name)}</option>`
+        ).join('');
+      sSel.innerHTML = '<option value="">All Statuses</option>' +
+        (d.available_statuses || []).map(s =>
+          `<option value="${csEsc(s)}" ${s === prevS ? 'selected' : ''}>${csEsc(s)}</option>`
+        ).join('');
+
+      // No local centre picked → show placeholder, do not render rows
+      if (!localCentre) {
+        count.textContent = '';
+        tfoot.innerHTML = '';
+        tbody.innerHTML = '<tr><td colspan="4" class="cs-empty">👆 Please select a centre to view outreach status</td></tr>';
+        return;
+      }
+
+      // A local centre is in scope — fetch rows narrowed to that single centre
+      const rowParams = csBuildParams();
+      rowParams.set('local_centre_id', localCentre);
+      if (localStatus) rowParams.set('local_status', localStatus);
+      fetch('/api/smb/outreach-status/?' + rowParams.toString())
+        .then(r => r.json())
+        .then(d2 => {
+          count.textContent = `${d2.row_count.toLocaleString('en-IN')} record${d2.row_count === 1 ? '' : 's'} · ${d2.total_open_positions.toLocaleString('en-IN')} open positions · ${d2.total_shortlisted.toLocaleString('en-IN')} shortlisted`;
+          if (!d2.rows.length) {
+            tfoot.innerHTML = '';
+            tbody.innerHTML = '<tr><td colspan="4" class="cs-empty">No outreach records match the current filters.</td></tr>';
+            return;
+          }
+          const statusClass = s => {
+            if (s === 'Lead Generated') return 'lead';
+            if (s === 'Contacted')      return 'contacted';
+            if (s === 'Interested')     return 'interested';
+            if (s === 'Declined')       return 'declined';
+            if (s === 'Pending')        return 'pending';
+            return '';
+          };
+          tbody.innerHTML = d2.rows.map(r => `
+            <tr>
+              <td class="left"><strong>${csEsc(r.discovered_employer || '—')}</strong>
+                <div style="font-size:11px;color:var(--muted);">${csEsc(r.centre_name || '')}</div></td>
+              <td style="text-align:center;"><span class="status-badge ${statusClass(r.status)}">${csEsc(r.status || '—')}</span></td>
+              <td class="num">${r.number_of_open_positions != null ? r.number_of_open_positions : '—'}</td>
+              <td class="num">${r.shortlisted != null ? r.shortlisted : '—'}</td>
+            </tr>`).join('');
+          tfoot.innerHTML = `<tr>
+            <td colspan="2">Total — ${d2.row_count} record${d2.row_count === 1 ? '' : 's'}</td>
+            <td class="num">${d2.total_open_positions.toLocaleString('en-IN')}</td>
+            <td class="num">${d2.total_shortlisted.toLocaleString('en-IN')}</td>
+          </tr>`;
+        });
+    });
+}
+
+// Wire table-header filter handlers
+document.getElementById('os-centre-filter').addEventListener('change', loadOutreachStatus);
+document.getElementById('os-status-filter').addEventListener('change', loadOutreachStatus);
+
+// ── Master refresh: reload all tables + filter cascade ─────────────────────
+function reloadAllSmbTables() {
+  loadOutreachKpi();
+  loadCertificationPipeline();
+  loadNapsPlan();
+  loadOutreachStatus();
+  loadNaps();
+  loadHJ();   // HJ shows placeholder if no scope is active, otherwise loads data
+}
+
+function csRefresh() {
+  csReloadFilters();
+  reloadAllSmbTables();
+}
+
+// Apply Filter button — explicit re-run (everything reloads anyway on change,
+// but the button gives a clear affordance like Employability has).
+function applyFilters() {
+  csRefresh();
+}
 
 function clearCertFilters() {
-  ['cs-bu','cs-tm','cs-project','cs-window','cs-centre','cs-qp'].forEach(id => {
+  ['cs-bu','cs-tm','cs-project','cs-centre','cs-qp'].forEach(id => {
     document.getElementById(id).value = '';
   });
+  document.getElementById('cs-window').value = '';
   csRefresh();
-  loadNaps();
 }
 
 // Cascading reset: changing a higher-level filter resets narrower ones
 document.getElementById('cs-bu').addEventListener('change', () => {
   document.getElementById('cs-tm').value = '';
   document.getElementById('cs-project').value = '';
-  document.getElementById('cs-window').value = '';
   document.getElementById('cs-centre').value = '';
   document.getElementById('cs-qp').value = '';
   csRefresh();
-  loadNaps();
 });
 document.getElementById('cs-tm').addEventListener('change', () => {
   document.getElementById('cs-project').value = '';
-  document.getElementById('cs-window').value = '';
   document.getElementById('cs-centre').value = '';
   document.getElementById('cs-qp').value = '';
   csRefresh();
-  loadNaps();
 });
 document.getElementById('cs-project').addEventListener('change', () => {
-  document.getElementById('cs-window').value = '';
   document.getElementById('cs-centre').value = '';
   document.getElementById('cs-qp').value = '';
   csRefresh();
-  loadNaps();
-});
-document.getElementById('cs-window').addEventListener('change', () => {
-  document.getElementById('cs-centre').value = '';
-  document.getElementById('cs-qp').value = '';
-  csRefresh();
-  loadNaps();
 });
 document.getElementById('cs-centre').addEventListener('change', () => {
   document.getElementById('cs-qp').value = '';
   csRefresh();
-  loadNaps();
-  // Sync the Hyperlocal Jobs centre filter to match the Cert Schedule centre
-  syncHJCentre();
+  // Note: main Centre change does NOT auto-fill the HJ / Out Reach Centre
+  // dropdowns. User explicitly picks a centre in each table's own dropdown
+  // to view that table's data.
 });
 document.getElementById('cs-qp').addEventListener('change', () => {
   csRefresh();
-  loadNaps();
 });
 
 // ── Hyperlocal Jobs centre sync ─────────────────────────────────────────────
-// When the user picks a centre in the Cert Schedule filters, drive the
-// Hyperlocal Jobs centre filter to match it (so the user doesn't have to
-// re-pick the same centre twice).
+// (Disabled by design — user must pick centre in HJ dropdown explicitly.)
 function syncHJCentre() {
-  const cid = document.getElementById('cs-centre').value;
-  const hjSel = document.getElementById('hj-centre-filter');
-  if (!hjSel) return;
-  // Only switch if a real centre was chosen (cleared "" → don't override)
-  if (!cid) return;
-  // Make sure the option exists in the HJ dropdown
-  let found = false;
-  for (const o of hjSel.options) { if (o.value === cid) { found = true; break; } }
-  if (!found) return;
-  if (hjSel.value !== cid) {
-    hjSel.value = cid;
-    hjInteracted = true;
-    loadHJ();
-  }
+  /* no-op: kept as a stub so existing callers (if any) don't fail */
 }
 
 csRefresh();

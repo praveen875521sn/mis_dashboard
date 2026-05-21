@@ -9,6 +9,38 @@
   </div>
 </div>
 
+<!-- SUB CLUSTER COUNT CARDS — number of sub clusters covered by each module -->
+<div class="sc-count-strip">
+  <div class="sc-count-card sc-emp">
+    <div class="sc-count-icon">📊</div>
+    <div class="sc-count-body">
+      <div class="sc-count-num" id="scc-emp">—</div>
+      <div class="sc-count-lbl">Sub Clusters in Employability</div>
+    </div>
+  </div>
+  <div class="sc-count-card sc-smb">
+    <div class="sc-count-icon">🏭</div>
+    <div class="sc-count-body">
+      <div class="sc-count-num" id="scc-smb">—</div>
+      <div class="sc-count-lbl">Sub Clusters in SMB</div>
+    </div>
+  </div>
+  <div class="sc-count-card sc-sahi">
+    <div class="sc-count-icon">🏫</div>
+    <div class="sc-count-body">
+      <div class="sc-count-num" id="scc-sahi">—</div>
+      <div class="sc-count-lbl">Sub Clusters in SAHI</div>
+    </div>
+  </div>
+  <div class="sc-count-card sc-sambhav">
+    <div class="sc-count-icon">🤝</div>
+    <div class="sc-count-body">
+      <div class="sc-count-num" id="scc-sambhav">—</div>
+      <div class="sc-count-lbl">Sub Clusters in Sambhav Community</div>
+    </div>
+  </div>
+</div>
+
 <!-- FILTER BAR -->
 <div class="card" style="margin-bottom:24px;">
   <div class="card-body" style="padding:18px 24px;">
@@ -189,6 +221,33 @@
 .cov-mark { font-size:18px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:50%; }
 .cov-mark.yes { background:rgba(34,197,94,.18);  color:#065f46; }
 .cov-mark.no  { background:rgba(248,113,113,.18); color:#991b1b; }
+
+/* Sub Cluster Count cards (4 across, full width) */
+.sc-count-strip {
+  display:grid; grid-template-columns:repeat(4, 1fr); gap:14px;
+  margin-bottom:22px;
+}
+.sc-count-card {
+  background:var(--card); border-radius:12px; padding:16px 18px;
+  border:1px solid var(--border); box-shadow:0 1px 3px rgba(0,0,0,0.05);
+  display:flex; align-items:center; gap:14px;
+  border-left:5px solid var(--card-accent, var(--primary));
+}
+.sc-count-card.sc-emp     { --card-accent:#2563ab; }
+.sc-count-card.sc-smb     { --card-accent:#198754; }
+.sc-count-card.sc-sahi    { --card-accent:#9b59b6; }
+.sc-count-card.sc-sambhav { --card-accent:#f59e0b; }
+.sc-count-icon { font-size:30px; line-height:1; }
+.sc-count-body { display:flex; flex-direction:column; gap:2px; }
+.sc-count-num  { font-size:28px; font-weight:800; color:var(--primary); line-height:1; }
+.sc-count-lbl  { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+
+@media (max-width: 980px) {
+  .sc-count-strip { grid-template-columns:repeat(2, 1fr); }
+}
+@media (max-width: 540px) {
+  .sc-count-strip { grid-template-columns:1fr; }
+}
 </style>
 {% endblock %}
 
@@ -266,6 +325,22 @@ function refreshCoverageTable() {
            <td style="text-align:center;">${t.sambhav}</td>
          </tr>`;
       document.getElementById('cov-meta').textContent = `${t.rows} sub cluster${t.rows===1?'':'s'}`;
+    });
+}
+
+// ─── Sub Cluster Count cards (above the nav cards) ───────────────────────────
+// Always shows global counts — how many sub clusters each module covers across
+// the whole system. NOT filtered by the Cluster dropdown (the count cards are
+// a high-level overview; the coverage table below is the per-cluster drill-down).
+function refreshSubClusterCounts() {
+  fetch('/api/sub-cluster-coverage/')   // global mode (no cluster)
+    .then(r => r.json())
+    .then(d => {
+      const t = d.totals || {};
+      document.getElementById('scc-emp').textContent     = fmt(t.employability || 0);
+      document.getElementById('scc-smb').textContent     = fmt(t.smb || 0);
+      document.getElementById('scc-sahi').textContent    = fmt(t.sahi || 0);
+      document.getElementById('scc-sambhav').textContent = fmt(t.sambhav || 0);
     });
 }
 
@@ -360,5 +435,6 @@ document.getElementById('sub-cluster-select').addEventListener('change', () => {
 loadSummary();
 refreshMapCard();
 refreshCoverageTable();
+refreshSubClusterCounts();
 </script>
 {% endblock %}

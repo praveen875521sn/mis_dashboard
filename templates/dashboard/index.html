@@ -344,6 +344,9 @@
           <option value="{{ c.centre_id }}" {% if c.centre_id == centre_id_filter %}selected{% endif %}>{{ c.centre_name }}</option>
         {% endfor %}
       </select>
+      <select id="cc-source-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
+        <option value="">All Sources</option>
+      </select>
       <select id="cc-category-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
         <option value="">All Categories</option>
       </select>
@@ -354,6 +357,7 @@
     <table id="cc-table">
       <thead>
         <tr>
+          <th class="left">Source</th>
           <th class="left">Category</th>
           <th class="left">Name / Place</th>
           <th class="left">Address</th>
@@ -364,7 +368,7 @@
         </tr>
       </thead>
       <tbody id="cc-tbody">
-        <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
+        <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
       </tbody>
     </table>
   </div>
@@ -698,48 +702,59 @@ function ratingStars(r) {
   return '⭐ ' + parseFloat(r).toFixed(1);
 }
 
-function loadCCCategories() {
+// Load both Source + Category dropdowns for the selected centre.
+// Source is always the full per-centre list. Category narrows further by the
+// currently selected source (if any) — selecting a source filters categories.
+function loadCCFilterOptions() {
   const centreId = document.getElementById('cc-centre-filter').value;
+  const srcSel   = document.getElementById('cc-source-filter');
+  const catSel   = document.getElementById('cc-category-filter');
   if (!centreId) {
-    // Reset category dropdown when no centre selected
-    document.getElementById('cc-category-filter').innerHTML = '<option value="">All Categories</option>';
+    srcSel.innerHTML = '<option value="">All Sources</option>';
+    catSel.innerHTML = '<option value="">All Categories</option>';
     return;
   }
-  const currentCat = document.getElementById('cc-category-filter').value;
+  const currentSrc = srcSel.value;
+  const currentCat = catSel.value;
   const params = new URLSearchParams({ centre_id: centreId });
+  if (currentSrc) params.set('source', currentSrc);
   fetch(`/api/community-college-categories/?${params}`)
     .then(r => r.json())
     .then(data => {
-      const sel = document.getElementById('cc-category-filter');
-      sel.innerHTML = '<option value="">All Categories</option>' +
-        data.categories.map(cat => `<option value="${cat}" ${cat === currentCat ? 'selected' : ''}>${cat}</option>`).join('');
+      srcSel.innerHTML = '<option value="">All Sources</option>' +
+        (data.sources || []).map(s => `<option value="${s}" ${s === currentSrc ? 'selected' : ''}>${s}</option>`).join('');
+      catSel.innerHTML = '<option value="">All Categories</option>' +
+        (data.categories || []).map(cat => `<option value="${cat}" ${cat === currentCat ? 'selected' : ''}>${cat}</option>`).join('');
     });
 }
 
 function loadCommunityColleges() {
   const centreId = document.getElementById('cc-centre-filter').value;
+  const source   = document.getElementById('cc-source-filter').value;
   const category = document.getElementById('cc-category-filter').value;
 
   // Require at least a centre to be selected
   if (!centreId) {
     document.getElementById('cc-count').textContent = '';
-    document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted);">👆 Please select a centre to view nearby institutes</td></tr>';
+    document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--muted);">👆 Please select a centre to view nearby institutes</td></tr>';
     return;
   }
 
   const params = new URLSearchParams({ centre_id: centreId });
+  if (source)   params.set('source', source);
   if (category) params.set('category', category);
-  document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+  document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
   fetch(`/api/community-colleges/?${params}`)
     .then(r => r.json())
     .then(data => {
       document.getElementById('cc-count').textContent = `${data.count} record${data.count !== 1 ? 's' : ''}`;
       if (data.results.length === 0) {
-        document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">No records found for the selected filters</td></tr>';
+        document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">No records found for the selected filters</td></tr>';
         return;
       }
       document.getElementById('cc-tbody').innerHTML = data.results.map(r => `
         <tr>
+          <td class="left" style="font-size:12px;">${r.source || '—'}</td>
           <td class="left"><span class="role-badge" style="background:var(--enrol-light,#eff6ff);color:var(--enrol,#3b82f6);">${r.category || '—'}</span></td>
           <td class="left"><strong>${r.name_place || '—'}</strong></td>
           <td class="left" style="font-size:12px;max-width:220px;white-space:normal;">${r.address || '—'}</td>
@@ -752,9 +767,17 @@ function loadCommunityColleges() {
     });
 }
 
-// Centre filter in Community Colleges syncs independently too
 document.getElementById('cc-centre-filter').addEventListener('change', function() {
-  loadCCCategories();
+  // New centre → reset Source + Category, repopulate both
+  document.getElementById('cc-source-filter').value   = '';
+  document.getElementById('cc-category-filter').value = '';
+  loadCCFilterOptions();
+  loadCommunityColleges();
+});
+document.getElementById('cc-source-filter').addEventListener('change', function() {
+  // Changing Source narrows the Category dropdown; also reset Category to "all"
+  document.getElementById('cc-category-filter').value = '';
+  loadCCFilterOptions();
   loadCommunityColleges();
 });
 document.getElementById('cc-category-filter').addEventListener('change', loadCommunityColleges);
@@ -768,7 +791,7 @@ loadCommunityColleges();   // will show placeholder since no centre selected
   const c = params.get('centre');
   if (c) {
     document.getElementById('cc-centre-filter').value = c;
-    loadCCCategories();
+    loadCCFilterOptions();
     loadCommunityColleges();
   }
 })();
