@@ -314,6 +314,7 @@ def build_mom_rows(batches_qs, fy):
 def home(request):
     cluster_filter      = request.GET.get('cluster', '')
     sub_cluster_filter  = request.GET.get('sub_cluster', '')
+    coverage_filter     = request.GET.get('coverage', '')
 
     # Cluster list — union of Center Master + Cluster Master (so empty-centre clusters
     # like Indore / Goa / Dewas, which exist in Cluster Master, still appear).
@@ -326,6 +327,8 @@ def home(request):
         .values_list('cluster', flat=True)
     )
     clusters = sorted(clusters_centre | clusters_master)
+    # Module-Coverage also narrows the Cluster dropdown
+    clusters = _filter_clusters_by_coverage(clusters, coverage_filter)
 
     sc_qs_centre = Centre.objects.exclude(sub_cluster='').exclude(sub_cluster=None)
     sc_qs_master = ClusterMaster.objects.exclude(sub_cluster='')
@@ -336,6 +339,8 @@ def home(request):
         set(sc_qs_centre.values_list('sub_cluster', flat=True))
         | set(sc_qs_master.values_list('sub_cluster', flat=True))
     )
+    # Apply the Module-Coverage filter (dropdown narrower only — doesn't scope metrics)
+    sub_clusters = _filter_sub_clusters_by_coverage(sub_clusters, coverage_filter, cluster_filter)
 
     # Map URL for the currently selected sub-cluster (if any)
     selected_map_url = ''
@@ -351,14 +356,177 @@ def home(request):
         'sub_clusters':        sub_clusters,
         'cluster_filter':      cluster_filter,
         'sub_cluster_filter':  sub_cluster_filter,
+        'coverage_filter':     coverage_filter,
+        'coverage_options':    COVERAGE_OPTIONS,
         'selected_map_url':    selected_map_url,
         'selected_state':      selected_state,
     })
 
 
+# ── Sub-cluster module-coverage helpers ───────────────────────────────────────
+#
+# A sub-cluster's "coverage profile" is which of the 4 modules have data for it:
+#   • Employability ✓  : ≥1 Centre exists in that sub-cluster
+#   • SMB           ✓  : ≥1 Centre in that sub-cluster runs a BatchPlan QP that
+#                        is marked NAPS Eligible='Yes' in the NAPS Eligible
+#                        master.  (Hyperlocal Jobs no longer contribute.)
+#   • SAHI          ✓  : ≥1 SAHIDemand row for that sub-cluster
+#   • Sambhav       ✓  : ≥1 SambhavCommunity row for that sub-cluster
+
+# Coverage codes used by the Home page's "Module Coverage" dropdown.  Each is an
+# EXACT match — e.g. "E-SMB" means the sub-cluster has Employability + SMB and
+# nothing else (no SAHI, no Sambhav).
+COVERAGE_PATTERNS = {
+    'E':             {'employability': True,  'smb': False, 'sahi': False, 'sambhav': False},
+    'E-SMB':         {'employability': True,  'smb': True,  'sahi': False, 'sambhav': False},
+    'E-SMB-SAHI':    {'employability': True,  'smb': True,  'sahi': True,  'sambhav': False},
+    'E-SMB-SAHI-SC': {'employability': True,  'smb': True,  'sahi': True,  'sambhav': True},
+    'SAHI':          {'employability': False, 'smb': False, 'sahi': True,  'sambhav': False},
+}
+
+COVERAGE_OPTIONS = [
+    ('E-SMB-SAHI-SC', 'Employability-SMB-SAHI-Sambhav Community'),
+    ('E-SMB-SAHI',    'Employability-SMB-SAHI'),
+    ('E-SMB',         'Employability-SMB'),
+    ('E',             'Employability'),
+    ('SAHI',          'SAHI'),
+]
+
+
+def _compute_sub_cluster_coverage(cluster=''):
+    """Return {sub_cluster: {employability/smb/sahi/sambhav: bool}} for a scope."""
+    cm_qs      = ClusterMaster.objects.exclude(sub_cluster='')
+    centre_qs  = Centre.objects.exclude(sub_cluster='').exclude(sub_cluster=None)
+    demand_qs  = SAHIDemand.objects.exclude(sub_cluster='')
+    sambhav_qs = SambhavCommunity.objects.exclude(sub_cluster='')
+    if cluster:
+        cm_qs      = cm_qs.filter(cluster=cluster)
+        centre_qs  = centre_qs.filter(cluster=cluster)
+        demand_qs  = demand_qs.filter(cluster=cluster)
+        sambhav_qs = sambhav_qs.filter(cluster=cluster)
+
+    sc_master  = set(cm_qs.values_list('sub_cluster', flat=True))
+    sc_centre  = set(centre_qs.values_list('sub_cluster', flat=True))
+    sc_demand  = set(demand_qs.values_list('sub_cluster', flat=True))
+    sc_sambhav = set(sambhav_qs.values_list('sub_cluster', flat=True))
+    sub_clusters = sorted(sc_master | sc_centre | sc_demand | sc_sambhav)
+
+    centre_to_sc = dict(centre_qs.values_list('centre_id', 'sub_cluster'))
+    centre_ids   = list(centre_to_sc.keys())
+
+    # NEW SMB rule — only QPs explicitly marked NAPS Eligible='Yes' count.
+    naps_yes_qps = set(
+        NapsEligible.objects.filter(naps_eligible='Yes')
+        .values_list('qp', flat=True)
+    )
+    naps_sub_clusters = set(
+        centre_to_sc[cid] for cid in
+        BatchPlan.objects.filter(centre_id__in=centre_ids, qp__in=naps_yes_qps)
+        .values_list('centre_id', flat=True).distinct()
+        if cid in centre_to_sc
+    )
+
+    return {
+        sc: {
+            'employability': sc in sc_centre,
+            'smb':           sc in naps_sub_clusters,
+            'sahi':          sc in sc_demand,
+            'sambhav':       sc in sc_sambhav,
+        }
+        for sc in sub_clusters
+    }
+
+
+def _filter_sub_clusters_by_coverage(sub_clusters, coverage_code, cluster=''):
+    """Apply an EXACT-match Module Coverage filter to a sub-cluster list."""
+    if not coverage_code or coverage_code not in COVERAGE_PATTERNS:
+        return sub_clusters
+    target  = COVERAGE_PATTERNS[coverage_code]
+    cov_map = _compute_sub_cluster_coverage(cluster)
+    return [sc for sc in sub_clusters if cov_map.get(sc) == target]
+
+
+def _coverage_matching_sub_clusters(coverage_code):
+    """
+    Return the GLOBAL set of sub-clusters matching the EXACT coverage pattern,
+    or None when no coverage is selected (= no scoping).
+
+    Used by every metric API to scope data when Module Coverage is active.
+    """
+    if not coverage_code or coverage_code not in COVERAGE_PATTERNS:
+        return None
+    target  = COVERAGE_PATTERNS[coverage_code]
+    cov_map = _compute_sub_cluster_coverage('')   # always global for metric scoping
+    return {sc for sc, cov in cov_map.items() if cov == target}
+
+
+def _sub_cluster_to_cluster_map():
+    """sub_cluster → cluster lookup, built from Centre + ClusterMaster."""
+    sc_to_cluster = dict(
+        ClusterMaster.objects.exclude(sub_cluster='').exclude(cluster='')
+        .values_list('sub_cluster', 'cluster')
+    )
+    for sc, cl in (
+        Centre.objects.exclude(sub_cluster='').exclude(cluster='').exclude(cluster=None)
+        .values_list('sub_cluster', 'cluster')
+    ):
+        sc_to_cluster.setdefault(sc, cl)
+    return sc_to_cluster
+
+
+def _filter_clusters_by_coverage(clusters, coverage_code):
+    """
+    Narrow a cluster list to only those that have at least one sub-cluster
+    matching the given EXACT-match Module Coverage code.
+    """
+    if not coverage_code or coverage_code not in COVERAGE_PATTERNS:
+        return clusters
+    target  = COVERAGE_PATTERNS[coverage_code]
+    cov_map = _compute_sub_cluster_coverage('')   # global
+    matching_scs = {sc for sc, cov in cov_map.items() if cov == target}
+
+    sc_to_cluster = _sub_cluster_to_cluster_map()
+    matching_clusters = {
+        sc_to_cluster[sc] for sc in matching_scs if sc in sc_to_cluster
+    }
+    return [c for c in clusters if c in matching_clusters]
+
+
+def clusters_api(request):
+    """
+    Cluster list (union of Centre + ClusterMaster), optionally narrowed by the
+    Home page's Module Coverage dropdown.
+
+      ?coverage=<code>   keep only clusters that have ≥1 sub-cluster matching
+                         the EXACT coverage pattern (see COVERAGE_PATTERNS)
+    """
+    coverage = request.GET.get('coverage', '')
+
+    clusters_centre = set(
+        Centre.objects.exclude(cluster='').exclude(cluster=None)
+        .values_list('cluster', flat=True)
+    )
+    clusters_master = set(
+        ClusterMaster.objects.exclude(cluster='')
+        .values_list('cluster', flat=True)
+    )
+    clusters = sorted(clusters_centre | clusters_master)
+    clusters = _filter_clusters_by_coverage(clusters, coverage)
+    return JsonResponse({'clusters': clusters})
+
+
 def cluster_sub_clusters_api(request):
-    """Sub-clusters under a given cluster — union of Centre + ClusterMaster."""
-    cluster = request.GET.get('cluster', '')
+    """
+    Sub-clusters under a given cluster — union of Centre + ClusterMaster.
+
+    Optional query params:
+      ?cluster=<name>     scope to a single cluster
+      ?coverage=<code>    narrow to sub-clusters matching the Module-Coverage
+                          dropdown (EXACT match — see COVERAGE_PATTERNS)
+    """
+    cluster  = request.GET.get('cluster', '')
+    coverage = request.GET.get('coverage', '')
+
     centre_sc = Centre.objects.exclude(sub_cluster='').exclude(sub_cluster=None)
     master_sc = ClusterMaster.objects.exclude(sub_cluster='')
     if cluster:
@@ -368,6 +536,7 @@ def cluster_sub_clusters_api(request):
         set(centre_sc.values_list('sub_cluster', flat=True))
         | set(master_sc.values_list('sub_cluster', flat=True))
     )
+    sub_clusters = _filter_sub_clusters_by_coverage(sub_clusters, coverage, cluster)
     return JsonResponse({'sub_clusters': sub_clusters})
 
 
@@ -405,57 +574,31 @@ def sub_cluster_coverage_api(request):
       1) **Global** (no cluster filter) → totals only (for Home count cards).
       2) **Per-cluster** (?cluster=X) → rows + totals (for coverage table).
 
+    A `?coverage=` Module Coverage filter further restricts the rows/totals
+    to sub-clusters matching the EXACT profile.
+
     Definitions:
       Employability ✓ : ≥1 Centre exists in that sub-cluster
-      SMB           ✓ : ≥1 HyperlocalJob OR NapsEligible-QP record reachable
-                        from centres in that sub-cluster
+      SMB           ✓ : ≥1 Centre in that sub-cluster runs a BatchPlan QP that
+                        is marked NAPS Eligible='Yes' in the NAPS Eligible
+                        master.  (Hyperlocal Jobs no longer contribute.)
       SAHI          ✓ : ≥1 SAHIDemand row for that sub-cluster
       Sambhav       ✓ : ≥1 SambhavCommunity row for that sub-cluster
+
+    Single source of truth: `_compute_sub_cluster_coverage()`.
     """
-    cluster = request.GET.get('cluster', '')
+    cluster  = request.GET.get('cluster', '')
+    coverage = request.GET.get('coverage', '')
 
-    cm_qs      = ClusterMaster.objects.exclude(sub_cluster='')
-    centre_qs  = Centre.objects.exclude(sub_cluster='').exclude(sub_cluster=None)
-    demand_qs  = SAHIDemand.objects.exclude(sub_cluster='')
-    sambhav_qs = SambhavCommunity.objects.exclude(sub_cluster='')
-    if cluster:
-        cm_qs      = cm_qs.filter(cluster=cluster)
-        centre_qs  = centre_qs.filter(cluster=cluster)
-        demand_qs  = demand_qs.filter(cluster=cluster)
-        sambhav_qs = sambhav_qs.filter(cluster=cluster)
+    cov_map = _compute_sub_cluster_coverage(cluster)
 
-    sc_master  = set(cm_qs.values_list('sub_cluster', flat=True))
-    sc_centre  = set(centre_qs.values_list('sub_cluster', flat=True))
-    sc_demand  = set(demand_qs.values_list('sub_cluster', flat=True))
-    sc_sambhav = set(sambhav_qs.values_list('sub_cluster', flat=True))
-    sub_clusters = sorted(sc_master | sc_centre | sc_demand | sc_sambhav)
+    # Module-Coverage further restricts to matching sub-clusters
+    matching_scs = _coverage_matching_sub_clusters(coverage)
+    if matching_scs is not None:
+        cov_map = {sc: cov for sc, cov in cov_map.items() if sc in matching_scs}
 
-    centre_to_sc = dict(centre_qs.values_list('centre_id', 'sub_cluster'))
-    centre_ids   = list(centre_to_sc.keys())
-
-    hj_sub_clusters = set(
-        centre_to_sc[cid] for cid in
-        HyperlocalJob.objects.filter(centre_id__in=centre_ids)
-        .values_list('centre_id', flat=True).distinct()
-        if cid in centre_to_sc
-    )
-    naps_qps = set(NapsEligible.objects.values_list('qp', flat=True))
-    naps_sub_clusters = set(
-        centre_to_sc[cid] for cid in
-        BatchPlan.objects.filter(centre_id__in=centre_ids, qp__in=naps_qps)
-        .values_list('centre_id', flat=True).distinct()
-        if cid in centre_to_sc
-    )
-
-    rows = []
-    for sc in sub_clusters:
-        rows.append({
-            'sub_cluster':     sc,
-            'employability':   sc in sc_centre,
-            'smb':             (sc in hj_sub_clusters) or (sc in naps_sub_clusters),
-            'sahi':            sc in sc_demand,
-            'sambhav':         sc in sc_sambhav,
-        })
+    rows = [{'sub_cluster': sc, **cov} for sc, cov in cov_map.items()]
+    rows.sort(key=lambda r: r['sub_cluster'])
 
     totals = {
         'rows':          len(rows),
@@ -470,6 +613,56 @@ def sub_cluster_coverage_api(request):
         'totals':  totals,
         'show':    bool(cluster),
         'cluster': cluster,
+    })
+
+
+def cluster_map_data_api(request):
+    """
+    Geo-data for the Home page Cluster Impact Map.
+
+    Returns one record per sub-cluster, each carrying a `locations` list of
+    [lat, lng] pairs. The frontend renders one green marker per location.
+
+    For sub-clusters whose Map URL contains explicit stops (35 of the 86),
+    each stop becomes its own location. For single-place URLs (51 of the 86),
+    the single `(lat, lng)` center pair is used.
+
+    Filters (optional):
+      ?cluster=<name>
+      ?sub_cluster=<name>
+      ?coverage=<code>      Module Coverage profile (EXACT match)
+    """
+    cluster     = request.GET.get('cluster', '')
+    sub_cluster = request.GET.get('sub_cluster', '')
+    coverage    = request.GET.get('coverage', '')
+
+    qs = ClusterMaster.objects.exclude(lat__isnull=True).exclude(lng__isnull=True)
+    if cluster:
+        qs = qs.filter(cluster=cluster)
+    if sub_cluster:
+        qs = qs.filter(sub_cluster=sub_cluster)
+    matching_scs = _coverage_matching_sub_clusters(coverage)
+    if matching_scs is not None:
+        qs = qs.filter(sub_cluster__in=matching_scs)
+
+    rows, total_locations = [], 0
+    for cm in qs:
+        # Prefer explicit stops; fall back to the (lat,lng) center otherwise.
+        locations = list(cm.stops) if cm.stops else [[cm.lat, cm.lng]]
+        total_locations += len(locations)
+        rows.append({
+            'sub_cluster_id': cm.sub_cluster_id,
+            'cluster':        cm.cluster,
+            'sub_cluster':    cm.sub_cluster,
+            'state':          cm.state,
+            'locations':      locations,
+            'map_url':        cm.map_url,
+        })
+
+    return JsonResponse({
+        'rows':            rows,
+        'count':           len(rows),
+        'total_locations': total_locations,
     })
 
 
@@ -494,12 +687,20 @@ def sambhav_view(request):
 
 def home_summary_api(request):
     """
-    Home page summary API. Driven by Cluster + Sub Cluster only.
+    Home page summary API. Driven by Cluster + Sub Cluster + Module Coverage.
     SAHI card now bridges via direct match on Cluster / Sub Cluster
     (SAHIDemand and Centre share the same taxonomy now).
+
+    When Module Coverage is selected, every queryset is further restricted to
+    sub-clusters matching that EXACT coverage profile.  So e.g. coverage=
+    "E-SMB-SAHI" zeros out the Sambhav card (those sub-clusters have no
+    Sambhav community data by definition).
     """
     cluster      = request.GET.get('cluster', '')
     sub_cluster  = request.GET.get('sub_cluster', '')
+    coverage     = request.GET.get('coverage', '')
+
+    matching_scs = _coverage_matching_sub_clusters(coverage)
 
     # ── Centre set for Employability + SMB ────────────────────────────────
     centre_qs = Centre.objects.all()
@@ -507,9 +708,11 @@ def home_summary_api(request):
         centre_qs = centre_qs.filter(cluster=cluster)
     if sub_cluster:
         centre_qs = centre_qs.filter(sub_cluster=sub_cluster)
+    if matching_scs is not None:
+        centre_qs = centre_qs.filter(sub_cluster__in=matching_scs)
     centre_ids = list(centre_qs.values_list('centre_id', flat=True))
 
-    scope_active = bool(cluster or sub_cluster)
+    scope_active = bool(cluster or sub_cluster or matching_scs is not None)
 
     # ── 1A: "Centres" = unique centres that have at least one BatchPlan row ──
     batched_ids = set(
@@ -549,6 +752,8 @@ def home_summary_api(request):
         sahi_demand_qs = sahi_demand_qs.filter(cluster=cluster)
     if sub_cluster:
         sahi_demand_qs = sahi_demand_qs.filter(sub_cluster=sub_cluster)
+    if matching_scs is not None:
+        sahi_demand_qs = sahi_demand_qs.filter(sub_cluster__in=matching_scs)
 
     sahi_clients = sahi_demand_qs.exclude(existing_client='') \
                                  .values('existing_client').distinct().count()
@@ -561,6 +766,8 @@ def home_summary_api(request):
     sc_qs = SambhavCommunity.objects.all()
     if cluster:     sc_qs = sc_qs.filter(cluster=cluster)
     if sub_cluster: sc_qs = sc_qs.filter(sub_cluster=sub_cluster)
+    if matching_scs is not None:
+        sc_qs = sc_qs.filter(sub_cluster__in=matching_scs)
     sc_projects  = sc_qs.exclude(project='').values('project').distinct().count()
     sc_locations = sc_qs.count()
 

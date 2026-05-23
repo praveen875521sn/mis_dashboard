@@ -2,6 +2,12 @@
 {% block title %}MIS Dashboard — Home{% endblock %}
 
 {% block content %}
+<!-- Leaflet for the Cluster Impact Map -->
+<link rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""/>
+
 <div class="page-header">
   <div>
     <div class="page-title">📊 MIS Dashboard</div>
@@ -45,6 +51,16 @@
 <div class="card" style="margin-bottom:24px;">
   <div class="card-body" style="padding:18px 24px;">
     <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+
+      <div class="filter-group">
+        <label>🧩 Module Coverage</label>
+        <select id="coverage-select">
+          <option value="">All</option>
+          {% for code, label in coverage_options %}
+            <option value="{{ code }}" {% if code == coverage_filter %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
 
       <div class="filter-group">
         <label>🗂 Cluster Filter</label>
@@ -165,6 +181,19 @@
 
 </div>
 
+<!-- ─── CLUSTER IMPACT MAP ─────────────────────────────────────────────────── -->
+<div class="card" style="margin-top:24px;">
+  <div class="card-header" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <div class="card-title">🗺️ Cluster Impact Map</div>
+    <span class="map-badge" id="map-count-sub">0 sub-clusters</span>
+    <span class="map-badge map-badge-blue" id="map-count-locations">0 locations</span>
+  </div>
+  <div id="cluster-map" style="height:560px;border-radius:0 0 14px 14px;background:#f8fafc;"></div>
+  <div id="map-empty" style="display:none;padding:60px 24px;text-align:center;color:var(--muted);font-size:14px;">
+    No mapped sub-clusters for this filter.
+  </div>
+</div>
+
 <!-- COVERAGE TABLE (only when a Cluster is selected) -->
 <div id="coverage-card" class="card" style="margin-top:24px;display:none;">
   <div class="card-header">
@@ -212,6 +241,34 @@
 
 #map-link:hover { background:#1557b0; }
 
+/* ─── Cluster Impact Map ─── */
+.map-badge {
+  background:#f1f5f9; border:1px solid var(--border); border-radius:999px;
+  padding:4px 12px; font-size:12px; font-weight:600; color:var(--muted);
+}
+.map-badge-blue { color:#1d4ed8; border-color:#bfdbfe; background:#eff6ff; }
+
+/* Green pulse marker */
+.cm-pin {
+  width:14px; height:14px; border-radius:50%;
+  background:#22c55e; border:2px solid #fff;
+  box-shadow:0 0 0 0 rgba(34,197,94,.55);
+  animation:cmPulseG 2.2s infinite;
+}
+@keyframes cmPulseG {
+  0%   { box-shadow:0 0 0 0 rgba(34,197,94,.55); }
+  70%  { box-shadow:0 0 0 12px rgba(34,197,94,0); }
+  100% { box-shadow:0 0 0 0 rgba(34,197,94,0); }
+}
+.leaflet-popup-content-wrapper { border-radius:10px; }
+.leaflet-popup-content { margin:12px 14px; font-size:13px; line-height:1.55; }
+.leaflet-popup-content b { color:var(--text); }
+.leaflet-popup-content .pop-meta { color:var(--muted); font-size:11px; margin-top:2px; }
+.leaflet-popup-content a.pop-link {
+  display:inline-block; margin-top:8px; padding:5px 12px; background:#1a73e8;
+  color:#fff; border-radius:6px; font-size:12px; font-weight:600; text-decoration:none;
+}
+
 /* Coverage table */
 .cov-tbl { width:100%; border-collapse:collapse; font-size:13px; }
 .cov-tbl thead th { background:#f8fafc; padding:11px 14px; text-align:left; font-weight:700; color:var(--primary); border-bottom:2px solid var(--border); position:sticky; top:0; z-index:1; }
@@ -257,10 +314,12 @@ function fmt(n) { return (n === null || n === undefined) ? '—' : n.toLocaleStr
 
 function buildParams() {
   const p = new URLSearchParams();
-  const c   = document.getElementById('cluster-select').value;
-  const sc  = document.getElementById('sub-cluster-select').value;
-  if (c)   p.set('cluster', c);
-  if (sc)  p.set('sub_cluster', sc);
+  const c    = document.getElementById('cluster-select').value;
+  const sc   = document.getElementById('sub-cluster-select').value;
+  const cov  = document.getElementById('coverage-select').value;
+  if (c)    p.set('cluster',     c);
+  if (sc)   p.set('sub_cluster', sc);
+  if (cov)  p.set('coverage',    cov);
   return p;
 }
 
@@ -290,13 +349,17 @@ function loadSummary() {
 
 // ─── Coverage table (only renders when a Cluster is selected) ────────────────
 function refreshCoverageTable() {
-  const cluster = document.getElementById('cluster-select').value;
-  const card    = document.getElementById('coverage-card');
+  const cluster  = document.getElementById('cluster-select').value;
+  const coverage = document.getElementById('coverage-select').value;
+  const card     = document.getElementById('coverage-card');
   if (!cluster) {
     card.style.display = 'none';
     return;
   }
-  fetch('/api/sub-cluster-coverage/?cluster=' + encodeURIComponent(cluster))
+  const params = new URLSearchParams();
+  params.set('cluster', cluster);
+  if (coverage) params.set('coverage', coverage);
+  fetch('/api/sub-cluster-coverage/?' + params.toString())
     .then(r => r.json())
     .then(d => {
       if (!d.show || !d.rows.length) {
@@ -328,12 +391,17 @@ function refreshCoverageTable() {
     });
 }
 
-// ─── Sub Cluster Count cards (above the nav cards) ───────────────────────────
-// Always shows global counts — how many sub clusters each module covers across
-// the whole system. NOT filtered by the Cluster dropdown (the count cards are
-// a high-level overview; the coverage table below is the per-cluster drill-down).
+// ─── Sub Cluster Count cards (the 4 colored cards above the nav cards) ──────
+// Now reactive: when Cluster or Module Coverage is selected, these reflect
+// just the sub-clusters in scope. E.g. with coverage=E-SMB-SAHI, Sambhav
+// count shows 0 (those sub-clusters have no Sambhav data by definition).
 function refreshSubClusterCounts() {
-  fetch('/api/sub-cluster-coverage/')   // global mode (no cluster)
+  const cluster  = document.getElementById('cluster-select').value;
+  const coverage = document.getElementById('coverage-select').value;
+  const params   = new URLSearchParams();
+  if (cluster)  params.set('cluster',  cluster);
+  if (coverage) params.set('coverage', coverage);
+  fetch('/api/sub-cluster-coverage/?' + params.toString())
     .then(r => r.json())
     .then(d => {
       const t = d.totals || {};
@@ -376,21 +444,27 @@ function navigateTo(page) {
 
 function clearFilters() {
   document.getElementById('cluster-select').value      = '';
+  document.getElementById('coverage-select').value     = '';
   document.getElementById('sub-cluster-select').innerHTML = '<option value="">All Sub Clusters</option>';
-  // Repopulate sub-cluster dropdown with full list
-  reloadSubClusters('');
+  // Repopulate dropdowns with full lists (no coverage filter applied)
+  reloadClusters('').then(() => reloadSubClusters(''));
   loadSummary();
   refreshMapCard();
   refreshNavCounts();
+  refreshSubClusterCounts();
   refreshCoverageTable();
 }
 
-// Reload sub-cluster dropdown based on selected cluster
+// Reload sub-cluster dropdown based on selected cluster + module-coverage filter
 function reloadSubClusters(preserveValue) {
-  const cluster = document.getElementById('cluster-select').value;
-  const sel     = document.getElementById('sub-cluster-select');
-  const want    = preserveValue ?? sel.value;
-  fetch('/api/cluster/sub-clusters/?cluster=' + encodeURIComponent(cluster))
+  const cluster  = document.getElementById('cluster-select').value;
+  const coverage = document.getElementById('coverage-select').value;
+  const sel      = document.getElementById('sub-cluster-select');
+  const want     = preserveValue ?? sel.value;
+  const params   = new URLSearchParams();
+  if (cluster)  params.set('cluster',  cluster);
+  if (coverage) params.set('coverage', coverage);
+  fetch('/api/cluster/sub-clusters/?' + params.toString())
     .then(r => r.json())
     .then(d => {
       sel.innerHTML = '<option value="">All Sub Clusters</option>';
@@ -403,10 +477,35 @@ function reloadSubClusters(preserveValue) {
     });
 }
 
+// Reload cluster dropdown based on module-coverage filter.  Returns a promise
+// so callers can wait for the dropdown to repopulate before reading its value.
+function reloadClusters(preserveValue) {
+  const coverage = document.getElementById('coverage-select').value;
+  const sel      = document.getElementById('cluster-select');
+  const want     = preserveValue ?? sel.value;
+  const params   = new URLSearchParams();
+  if (coverage) params.set('coverage', coverage);
+  return fetch('/api/cluster/clusters/?' + params.toString())
+    .then(r => r.json())
+    .then(d => {
+      sel.innerHTML = '<option value="">All Clusters</option>';
+      d.clusters.forEach(c => {
+        const o = document.createElement('option');
+        o.value = c; o.textContent = c;
+        if (c === want) o.selected = true;
+        sel.appendChild(o);
+      });
+    });
+}
+
 function refreshNavCounts() {
-  const cluster = document.getElementById('cluster-select').value;
-  const q = cluster ? '?cluster=' + encodeURIComponent(cluster) : '';
-  fetch('/api/nav-counts/' + q)
+  const cluster  = document.getElementById('cluster-select').value;
+  const coverage = document.getElementById('coverage-select').value;
+  const params   = new URLSearchParams();
+  if (cluster)  params.set('cluster',  cluster);
+  if (coverage) params.set('coverage', coverage);
+  const qs = params.toString();
+  fetch('/api/nav-counts/' + (qs ? '?' + qs : ''))
     .then(r => r.json())
     .then(d => {
       const a = document.getElementById('navCountCluster');
@@ -424,17 +523,151 @@ document.getElementById('cluster-select').addEventListener('change', function() 
   loadSummary();
   refreshMapCard();
   refreshNavCounts();
+  refreshSubClusterCounts();
   refreshCoverageTable();
+  refreshClusterMap();
+});
+
+document.getElementById('coverage-select').addEventListener('change', function() {
+  // Module-Coverage change → narrow BOTH dropdowns AND scope every metric.
+  // Reset selected cluster & sub-cluster (they may not match the new coverage).
+  document.getElementById('cluster-select').value     = '';
+  document.getElementById('sub-cluster-select').value = '';
+  // Reload Cluster first, then Sub-Cluster (which depends on cluster value).
+  reloadClusters('').then(() => {
+    reloadSubClusters('');
+    loadSummary();
+    refreshMapCard();
+    refreshNavCounts();
+    refreshSubClusterCounts();
+    refreshCoverageTable();
+    refreshClusterMap();
+  });
 });
 
 document.getElementById('sub-cluster-select').addEventListener('change', () => {
   loadSummary();
   refreshMapCard();
+  refreshSubClusterCounts();
+  refreshClusterMap();
 });
 
 loadSummary();
 refreshMapCard();
 refreshCoverageTable();
 refreshSubClusterCounts();
+</script>
+
+<!-- ─── Cluster Impact Map (Leaflet) ─── -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>
+<script>
+(function () {
+  const INDIA_CENTER = [22.5, 80];
+  const INDIA_ZOOM   = 5;
+
+  const mapEl = document.getElementById('cluster-map');
+  if (!mapEl) return;
+
+  const clusterMap = L.map(mapEl, { zoomControl: true })
+                      .setView(INDIA_CENTER, INDIA_ZOOM);
+
+  // Light Carto tiles to match the dashboard's light theme.
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap · © CARTO',
+    subdomains: 'abcd', maxZoom: 19
+  }).addTo(clusterMap);
+
+  const markerLayer = L.layerGroup().addTo(clusterMap);
+
+  // Single shared icon definition (all markers are green).
+  const GREEN_ICON = L.divIcon({
+    className: '',
+    html: '<div class="cm-pin"></div>',
+    iconSize: [18, 18], iconAnchor: [9, 9]
+  });
+
+  function popupHtml(r) {
+    return ''
+      + '<b>' + (r.sub_cluster || '') + '</b>'
+      + '<div class="pop-meta">'
+      +   (r.cluster || '') + ' · ' + (r.state || '') + ' · ' + (r.sub_cluster_id || '')
+      + '</div>'
+      + (r.map_url
+          ? '<a class="pop-link" href="' + r.map_url
+              + '" target="_blank" rel="noopener">Open in Google Maps →</a>'
+          : '');
+  }
+
+  window.refreshClusterMap = function () {
+    const cluster  = document.getElementById('cluster-select').value;
+    const sub      = document.getElementById('sub-cluster-select').value;
+    const coverage = document.getElementById('coverage-select').value;
+    const params   = new URLSearchParams();
+    if (cluster)  params.set('cluster',     cluster);
+    if (sub)      params.set('sub_cluster', sub);
+    if (coverage) params.set('coverage',    coverage);
+    const qs = params.toString();
+
+    fetch('/api/cluster/map-data/' + (qs ? '?' + qs : ''))
+      .then(r => r.json())
+      .then(d => {
+        markerLayer.clearLayers();
+
+        const empty  = document.getElementById('map-empty');
+        const mapDiv = document.getElementById('cluster-map');
+        if (!d.rows || d.rows.length === 0) {
+          mapDiv.style.display = 'none';
+          empty.style.display  = 'block';
+        } else {
+          empty.style.display  = 'none';
+          mapDiv.style.display = '';
+        }
+
+        // Header badges
+        document.getElementById('map-count-sub').textContent =
+          d.count + ' sub-cluster' + (d.count !== 1 ? 's' : '');
+        document.getElementById('map-count-locations').textContent =
+          d.total_locations + ' location' + (d.total_locations !== 1 ? 's' : '');
+
+        // Drop one marker per location; markers within the same sub-cluster
+        // share the same popup so the user always sees the sub-cluster context.
+        const bounds = [];
+        (d.rows || []).forEach(r => {
+          const popup = popupHtml(r);
+          (r.locations || []).forEach(([lat, lng]) => {
+            if (lat == null || lng == null) return;
+            L.marker([lat, lng], { icon: GREEN_ICON })
+              .addTo(markerLayer)
+              .bindPopup(popup);
+            bounds.push([lat, lng]);
+          });
+        });
+
+        // Fit view to the markers
+        clusterMap.invalidateSize();
+        if (bounds.length === 1) {
+          clusterMap.setView(bounds[0], 11);
+        } else if (bounds.length > 1) {
+          clusterMap.fitBounds(bounds, { padding: [40, 40] });
+        } else {
+          clusterMap.setView(INDIA_CENTER, INDIA_ZOOM);
+        }
+      })
+      .catch(err => console.error('Cluster map load failed:', err));
+  };
+
+  // Hook the existing Clear button so the map also resets.
+  const origClear = window.clearFilters;
+  if (typeof origClear === 'function') {
+    window.clearFilters = function () {
+      origClear.apply(this, arguments);
+      setTimeout(refreshClusterMap, 0);
+    };
+  }
+
+  refreshClusterMap();
+})();
 </script>
 {% endblock %}
