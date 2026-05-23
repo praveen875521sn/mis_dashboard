@@ -11,6 +11,9 @@ class Centre(models.Model):
     cluster        = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     sub_cluster    = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     entity         = models.CharField(max_length=50,  null=True, blank=True)
+    # From "Center Status (Active/ Closed/ Going to Close)" column in Center Master.xlsx
+    # Common values: "Active", "Opeing Shortly", "Closing Shortly" (note typo in source data)
+    center_status  = models.CharField(max_length=50, blank=True, db_index=True)
 
     def __str__(self):
         return self.centre_name
@@ -226,6 +229,16 @@ class ClusterMaster(models.Model):
     sub_cluster    = models.CharField(max_length=255, db_index=True)
     state          = models.CharField(max_length=100, blank=True)
     map_url        = models.TextField(blank=True)  # long Google Maps directions URLs
+    # Coordinates parsed from map_url (center of the cluster area).
+    # Populated by import_data.py / parse_cluster_coords management command.
+    lat            = models.FloatField(null=True, blank=True)
+    lng            = models.FloatField(null=True, blank=True)
+    # List of [lat, lng] pairs for each individual stop encoded in the Google
+    # Maps URL — these are the actual sub-locations (e.g., Whitefield, Hoskote,
+    # Mahadevapura for "Bangalore East – Whitefield / Hoskote Belt").
+    # For URLs with no stops the list is empty; treat `lat`/`lng` as the
+    # single location in that case.
+    stops          = models.JSONField(default=list, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=['cluster', 'sub_cluster'])]

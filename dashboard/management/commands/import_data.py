@@ -1,10 +1,61 @@
 import pandas as pd
 import numpy as np
+import re
 from django.core.management.base import BaseCommand
 from dashboard.models import (Centre, BatchPlan, CertSchedule, ManpowerStaff,
                               CommunityCollege, HyperlocalJob, NapsEligible,
                               ClusterMaster, SambhavCommunity, NAPSData, NAPSPlan,
                               OutreachStatus)
+
+
+# India bounding box (lat 6–38, lng 67–98). Anything outside is treated as junk.
+_RE_AT_CENTER = re.compile(r'@([-\d.]+),([-\d.]+),')
+_RE_DIR_STOP  = re.compile(r'!1d([-\d.]+)!2d([-\d.]+)')   # directions URL → !1dLNG!2dLAT
+_RE_PLACE_3D4D = re.compile(r'!3d([-\d.]+)!4d([-\d.]+)')   # place URL → !3dLAT!4dLNG
+
+
+def parse_lat_lng(url):
+    """Extract a (lat, lng) center pair from a Google Maps URL.
+    Tries @lat,lng, then !3d/!4d (place), then the first !1d/!2d stop (directions).
+    Returns (None, None) if nothing usable is found."""
+    if not isinstance(url, str) or not url:
+        return None, None
+    m = _RE_AT_CENTER.search(url)
+    if m:
+        lat, lng = float(m.group(1)), float(m.group(2))
+        if 6 < lat < 38 and 67 < lng < 98:
+            return lat, lng
+    m = _RE_PLACE_3D4D.search(url)
+    if m:
+        lat, lng = float(m.group(1)), float(m.group(2))
+        if 6 < lat < 38 and 67 < lng < 98:
+            return lat, lng
+    m = _RE_DIR_STOP.search(url)
+    if m:
+        lng, lat = float(m.group(1)), float(m.group(2))   # note ordering
+        if 6 < lat < 38 and 67 < lng < 98:
+            return lat, lng
+    return None, None
+
+
+def parse_stops(url):
+    """Extract a list of [lat, lng] for every individual stop in a Google Maps
+    directions URL. Returns []  when no stops are present (single-place URLs)."""
+    if not isinstance(url, str) or not url:
+        return []
+    stops = []
+    for lng, lat in _RE_DIR_STOP.findall(url):
+        lat_f, lng_f = float(lat), float(lng)
+        if 6 < lat_f < 38 and 67 < lng_f < 98:
+            stops.append([lat_f, lng_f])
+    # Deduplicate while preserving order (some URLs repeat the same point)
+    seen, deduped = set(), []
+    for p in stops:
+        key = (round(p[0], 6), round(p[1], 6))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(p)
+    return deduped
 
 
 def safe_date(val):
@@ -74,13 +125,19 @@ class Command(BaseCommand):
                 scid = safe_str(row.get('Sub Cluster ID', ''))
                 if not scid:
                     continue
+                map_url = safe_str(row.get('Map', ''))
+                lat, lng = parse_lat_lng(map_url)
+                stops    = parse_stops(map_url)
                 ClusterMaster.objects.update_or_create(
                     sub_cluster_id=scid,
                     defaults={
                         'cluster':     safe_str(row.get('Cluster', '')),
                         'sub_cluster': safe_str(row.get('Sub Cluster', '')),
                         'state':       safe_str(row.get('State', '')),
-                        'map_url':     safe_str(row.get('Map', '')),
+                        'map_url':     map_url,
+                        'lat':         lat,
+                        'lng':         lng,
+                        'stops':       stops,
                     }
                 )
                 created += 1
@@ -126,6 +183,8 @@ class Command(BaseCommand):
                         'cluster':        safe_str(row.get('Cluster', '')),
                         'sub_cluster':    safe_str(row.get('Sub Cluster', '')),
                         'entity':         safe_str(row.get('Entity', '')),
+                        'center_status':  safe_str(row.get(
+                            'Center Status (Active/ Closed/ Going to Close)', '')),
                     }
             self.stdout.write(f'  {len(cluster_map)} centre→cluster mappings loaded')
         except FileNotFoundError:
@@ -150,6 +209,7 @@ class Command(BaseCommand):
                     'cluster':        cm_data.get('cluster', ''),
                     'sub_cluster':    cm_data.get('sub_cluster', ''),
                     'entity':         cm_data.get('entity', ''),
+                    'center_status':  cm_data.get('center_status', ''),
                 }
             )
         self.stdout.write(f'  {Centre.objects.count()} centres loaded')
