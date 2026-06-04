@@ -94,17 +94,17 @@ class Command(BaseCommand):
         data_dir = options['data_dir']
 
         mob_path = os.path.join(data_dir, 'Mobilsier_Target.xlsx')
-        tr_path  = os.path.join(data_dir, 'Trainer_Target.xlsx')
 
         if os.path.exists(mob_path):
             self._import_mobiliser(mob_path)
         else:
             self.stdout.write(self.style.WARNING(f'  (Mobilsier_Target.xlsx not found in {data_dir}/)'))
 
-        if os.path.exists(tr_path):
-            self._import_trainer(tr_path)
-        else:
-            self.stdout.write(self.style.WARNING(f'  (Trainer_Target.xlsx not found in {data_dir}/)'))
+        # NOTE: Trainer_Target.xlsx is no longer loaded here.
+        # Trainer-level data now comes from Trainer_productivity_present.xlsx
+        # and Trainer_productivity_duration.xlsx via the
+        # `import_productivity_supply` command. The TrainerTarget / TrainerTargetDay
+        # models are kept for migration history but are no longer populated.
 
         self.stdout.write(self.style.SUCCESS('Target data import complete.'))
 

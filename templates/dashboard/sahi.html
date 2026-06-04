@@ -21,13 +21,28 @@
     <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
 
       <div class="filter-group">
+        <label>🏭 Zone</label>
+        <select id="zone-select"><option value="">All Zones</option></select>
+      </div>
+
+      <div class="filter-group">
+        <label>🌐 Region</label>
+        <select id="region-select"><option value="">All Regions</option></select>
+      </div>
+
+      <div class="filter-group">
         <label>🗂 Cluster</label>
         <select id="cluster-select"><option value="">All Clusters</option></select>
       </div>
 
-      <div class="filter-group" style="min-width:300px;">
+      <div class="filter-group" style="min-width:280px;">
         <label>📍 Sub Cluster</label>
         <select id="sub-cluster-select"><option value="">All Sub Clusters</option></select>
+      </div>
+
+      <div class="filter-group" style="min-width:280px;">
+        <label>🏢 Existing Client</label>
+        <select id="client-select"><option value="">All Clients</option></select>
       </div>
 
       <button onclick="clearFilters()"
@@ -59,6 +74,8 @@
   <div class="summary-card"><div class="label">Clients</div><div class="value" id="kpi-clients">—</div></div>
   <div class="summary-card enrol"><div class="label">Total HC</div><div class="value" id="kpi-hc">—</div></div>
   <div class="summary-card cert"><div class="label">Monthly Demand</div><div class="value" id="kpi-monthly">—</div></div>
+  <div class="summary-card"><div class="label">Production Sub Clusters</div><div class="value" id="kpi-prod-sc">—</div></div>
+  <div class="summary-card"><div class="label">Tech &amp; Services Sub Clusters</div><div class="value" id="kpi-tech-sc">—</div></div>
 </div>
 
 <!-- TABLE 1 — DEMAND BY EXISTING CLIENT -->
@@ -106,6 +123,32 @@
   </div>
 </div>
 
+<!-- TABLE 2B — QP ↔ BATCHPLAN MATCH -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">🎯 QP Match — BatchPlan (All Centres Nationally)</div>
+    <div style="font-size:12px;color:var(--muted);" id="t2b-meta"></div>
+  </div>
+  <div id="t2b-info" style="padding:12px 20px;font-size:13px;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);"></div>
+  <div class="table-wrap" style="max-height:480px;overflow-y:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Centre Name</th>
+          <th>QP Name</th>
+          <th>Cluster</th>
+          <th>Sub Cluster</th>
+          <th class="num">Enrolment Planned</th>
+          <th class="num">Certification Planned</th>
+          <th class="num">Placement Planned</th>
+        </tr>
+      </thead>
+      <tbody id="t2b-body"></tbody>
+      <tfoot id="t2b-foot"></tfoot>
+    </table>
+  </div>
+</div>
+
 <!-- TABLE 3 — DIPLOMA COLLEGES & INSTITUTES & TRAINING CENTRES -->
 <div class="card">
   <div class="card-header">
@@ -129,6 +172,75 @@
   </div>
 </div>
 
+<!-- WORKSETU FILTER SECTION — above Supply Summary & ITI only -->
+<div class="card" style="margin-bottom:0;border-bottom:none;border-radius:12px 12px 0 0;">
+  <div class="card-body" style="padding:14px 24px;">
+    <div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em;">
+      🔗 WorkSetu Supply Filters — narrows Supply Summary &amp; ITI tables
+    </div>
+    <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+      <div class="filter-group" style="min-width:280px;">
+        <label>🏭 Employability Sub Cluster <span id="emp-sc-count" style="color:var(--muted);font-weight:400;"></span></label>
+        <select id="emp-sc-select"><option value="">All Employability Sub Clusters</option></select>
+      </div>
+      <div class="filter-group" style="min-width:280px;">
+        <label>🔗 WorkSetu Sub Cluster <span id="ws-sc-count" style="color:var(--muted);font-weight:400;"></span></label>
+        <select id="ws-sc-select"><option value="">All WorkSetu Sub Clusters</option></select>
+      </div>
+      <button onclick="clearWorksetuFilters()"
+        style="padding:8px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;color:var(--muted);">
+        ✕ Clear
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- TABLE 4 — SUPPLY SUMMARY (Associate Data, keyed by Sub Cluster ID) -->
+<div class="card" style="border-radius:0 0 12px 12px;">
+  <div class="card-header">
+    <div class="card-title">🧭 Supply Summary — Associates by State, District &amp; Client</div>
+    <div style="font-size:12px;color:var(--muted);" id="t4-meta"></div>
+  </div>
+  <div id="t4-info" style="padding:12px 20px;font-size:13px;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);"></div>
+  <div class="table-wrap" style="max-height:480px;overflow-y:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Supply State</th>
+          <th>Supply District</th>
+          <th>Client</th>
+          <th>Gender</th>
+          <th class="num">Count</th>
+        </tr>
+      </thead>
+      <tbody id="t4-body"></tbody>
+      <tfoot id="t4-foot"></tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- TABLE 5 — ITI / POLYTECHNIC COLLEGES (Supply chain by PIN) -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">🏛️ Supply Chain — ITI &amp; Polytechnic Colleges (by Supply PIN)</div>
+    <div style="font-size:12px;color:var(--muted);" id="t5-meta"></div>
+  </div>
+  <div id="t5-info" style="padding:12px 20px;font-size:13px;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);"></div>
+  <div class="table-wrap" style="max-height:480px;overflow-y:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Institution Name</th>
+          <th>Type</th>
+          <th>Address / Location</th>
+          <th>Supply PIN</th>
+        </tr>
+      </thead>
+      <tbody id="t5-body"></tbody>
+    </table>
+  </div>
+</div>
+
 <style>
 .filter-group { display:flex; flex-direction:column; gap:5px; min-width:240px; }
 .filter-group label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; }
@@ -147,8 +259,11 @@ table tfoot td { padding:11px 14px; background:#f1f5f9; font-weight:700; color:v
 {% block extra_js %}
 <script>
 const PRESET = {
+  zone:        "{{ request.GET.zone|escapejs }}",
+  region:      "{{ request.GET.region|escapejs }}",
   cluster:     "{{ cluster_filter|escapejs }}",
   sub_cluster: "{{ sub_cluster_filter|escapejs }}",
+  client:      "{{ request.GET.existing_client|escapejs }}",
 };
 
 function fmt(n) { return (n === null || n === undefined) ? '—' : Number(n).toLocaleString('en-IN'); }
@@ -159,68 +274,78 @@ function esc(s) {
 
 function setSelectOptions(id, values, selected, placeholder) {
   const sel = document.getElementById(id);
-  const cur = selected !== undefined ? selected : sel.value;
   sel.innerHTML = `<option value="">${placeholder || 'All'}</option>`;
   values.forEach(v => {
     const o = document.createElement('option');
     o.value = v; o.textContent = v;
-    if (v === cur) o.selected = true;
+    if (v === selected) o.selected = true;
     sel.appendChild(o);
   });
 }
 
 function buildParams() {
   const p = new URLSearchParams();
-  // Read from dropdowns first; fall back to PRESET (the ?cluster=… / ?sub_cluster=…
-  // values forwarded from Home) so that the initial table/KPI load respects them
-  // even before the dropdowns have been populated asynchronously.
-  const clSel = document.getElementById('cluster-select');
-  const scSel = document.getElementById('sub-cluster-select');
-  // "dropdown not yet populated" = only the placeholder option exists
-  const c  = clSel.value || (clSel.options.length <= 1 ? PRESET.cluster : '');
-  const sc = scSel.value || (scSel.options.length <= 1 ? PRESET.sub_cluster : '');
+  const z  = document.getElementById('zone-select').value;
+  const rg = document.getElementById('region-select').value;
+  const c  = document.getElementById('cluster-select').value;
+  const sc = document.getElementById('sub-cluster-select').value;
+  const cl = document.getElementById('client-select').value;
+  if (z)  p.set('zone', z);
+  if (rg) p.set('region', rg);
   if (c)  p.set('cluster', c);
   if (sc) p.set('sub_cluster', sc);
+  if (cl) p.set('existing_client', cl);
   return p;
 }
 
-function reloadFilterOptions(preserveSc) {
-  // Use the cascading API to get clusters + sub-clusters given current cluster filter.
-  // On the very first call the dropdown isn't populated yet, so fall back to PRESET.cluster
-  // (which is the ?cluster=… query-string value sent by Home / Back-to-Home navigation).
+function reloadFilterOptions() {
   const params = buildParams();
-  if (!params.get('cluster') && PRESET.cluster) {
-    params.set('cluster', PRESET.cluster);
-  }
   fetch('/api/sahi/filter-options/?' + params.toString())
     .then(r => r.json())
     .then(data => {
-      // Cluster dropdown — only set on first load (full list)
-      const clSel = document.getElementById('cluster-select');
-      if (clSel.options.length <= 1) {
-        setSelectOptions('cluster-select', data.clusters, PRESET.cluster, 'All Clusters');
-      }
-      // Sub Cluster dropdown — narrows by cluster
-      const want = preserveSc !== undefined ? preserveSc :
-                   (document.getElementById('sub-cluster-select').value || PRESET.sub_cluster);
-      setSelectOptions('sub-cluster-select', data.sub_clusters, want, 'All Sub Clusters');
+      const curZone = document.getElementById('zone-select').value;
+      const curRegion = document.getElementById('region-select').value;
+      const curCluster = document.getElementById('cluster-select').value;
+      const curSC = document.getElementById('sub-cluster-select').value;
+      const curClient = document.getElementById('client-select').value;
+      setSelectOptions('zone-select',       data.zones,            curZone,    'All Zones');
+      setSelectOptions('region-select',     data.regions,          curRegion,  'All Regions');
+      setSelectOptions('cluster-select',    data.clusters,         curCluster, 'All Clusters');
+      setSelectOptions('sub-cluster-select',data.sub_clusters,     curSC,      'All Sub Clusters');
+      setSelectOptions('client-select',     data.existing_clients, curClient,  'All Clients');
     });
+}
+
+function initialLoad() {
+  // Populate dropdowns from PRESET (URL params passed from Home)
+  const params = new URLSearchParams();
+  if (PRESET.zone)        params.set('zone', PRESET.zone);
+  if (PRESET.region)      params.set('region', PRESET.region);
+  if (PRESET.cluster)     params.set('cluster', PRESET.cluster);
+  if (PRESET.sub_cluster) params.set('sub_cluster', PRESET.sub_cluster);
+  if (PRESET.client)      params.set('existing_client', PRESET.client);
+
+  reloadWorksetuOptions();
+  fetch('/api/sahi/filter-options/?' + params.toString())
+    .then(r => r.json())
+    .then(data => {
+      setSelectOptions('zone-select',       data.zones,            PRESET.zone,        'All Zones');
+      setSelectOptions('region-select',     data.regions,          PRESET.region,      'All Regions');
+      setSelectOptions('cluster-select',    data.clusters,         PRESET.cluster,     'All Clusters');
+      setSelectOptions('sub-cluster-select',data.sub_clusters,     PRESET.sub_cluster, 'All Sub Clusters');
+      setSelectOptions('client-select',     data.existing_clients, PRESET.client,      'All Clients');
+    });
+  loadAllTables();
 }
 
 function refreshMapCard() {
   const sc   = document.getElementById('sub-cluster-select').value;
   const card = document.getElementById('map-card');
-  if (!sc) {
-    card.style.display = 'none';
-    return;
-  }
+  if (!sc) { card.style.display = 'none'; return; }
   fetch('/api/sub-cluster-map/?sub_cluster=' + encodeURIComponent(sc))
     .then(r => r.json())
     .then(d => {
-      if (!d.map_url) {
-        card.style.display = 'none';
-        return;
-      }
+      if (!d.map_url) { card.style.display = 'none'; return; }
       document.getElementById('map-sc-name').textContent = sc;
       document.getElementById('map-sc-meta').textContent =
         [d.cluster, d.state, d.sub_cluster_id].filter(Boolean).join(' · ');
@@ -250,33 +375,29 @@ function loadDemandTable() {
         });
       }
       const t = data.totals;
-      document.getElementById('kpi-clients').textContent = fmt(t.clients);
-      document.getElementById('kpi-hc').textContent      = fmt(t.total_hc);
-      document.getElementById('kpi-monthly').textContent = fmt(t.monthly_demand);
+      document.getElementById('kpi-clients').textContent  = fmt(t.clients);
+      document.getElementById('kpi-hc').textContent       = fmt(t.total_hc);
+      document.getElementById('kpi-monthly').textContent  = fmt(t.monthly_demand);
+      document.getElementById('kpi-prod-sc').textContent  = fmt(t.prod_sub_clusters);
+      document.getElementById('kpi-tech-sc').textContent  = fmt(t.tech_sub_clusters);
       document.getElementById('t1-meta').textContent =
         `${t.rows.toLocaleString('en-IN')} rows · ${t.clients.toLocaleString('en-IN')} clients`;
     });
 }
 
 function loadCentreTable() {
-  // Use buildParams() so PRESET (?cluster=…&sub_cluster=…) is honoured on first
-  // load before the dropdowns are populated asynchronously.
-  const params    = buildParams();
-  const cluster   = params.get('cluster')     || '';
-  const subCluster= params.get('sub_cluster') || '';
-
+  const params = buildParams();
+  const cluster    = params.get('cluster')     || '';
+  const subCluster = params.get('sub_cluster') || '';
   const t2body = document.getElementById('t2-body');
   const t2foot = document.getElementById('t2-foot');
   const info   = document.getElementById('t2-info');
   const meta   = document.getElementById('t2-meta');
-
   t2body.innerHTML = ''; t2foot.innerHTML = ''; meta.textContent = '';
-
   if (!cluster && !subCluster) {
     info.innerHTML = '👉 Select a <b>Cluster</b> (or Sub Cluster) to see nearby centres.';
     return;
   }
-
   fetch('/api/sahi/centre-table/?' + params.toString())
     .then(r => r.json())
     .then(data => {
@@ -315,22 +436,17 @@ function loadCentreTable() {
 }
 
 function loadDiplomaTable() {
-  // Use buildParams() so PRESET is honoured on first load.
   const params    = buildParams();
   const cluster   = params.get('cluster')     || '';
   const subCluster= params.get('sub_cluster') || '';
-
   const tbody = document.getElementById('t3-body');
   const info  = document.getElementById('t3-info');
   const meta  = document.getElementById('t3-meta');
-
   tbody.innerHTML = ''; meta.textContent = '';
-
   if (!cluster && !subCluster) {
     info.innerHTML = '👉 Select a <b>Cluster</b> (or Sub Cluster) to see nearby diploma colleges &amp; institutes.';
     return;
   }
-
   fetch('/api/sahi/diploma-table/?' + params.toString())
     .then(r => r.json())
     .then(data => {
@@ -355,41 +471,265 @@ function loadDiplomaTable() {
           </tr>`);
       });
       const t = data.totals;
-      meta.textContent = `${t.rows} rows · ${t.diploma} diploma · ${t.institutes} institutes · ${t.centres} centres`;
+      meta.textContent = `${t.rows} rows · ${t.diploma} diploma · ${t.institutes} ITIs · ${t.training_centres} training centres · ${t.centres} centres`;
     });
 }
 
-function refresh() {
-  reloadFilterOptions();
+function loadQPBatchTable() {
+  fetch('/api/sahi/qp-batch/?' + buildParams().toString())
+    .then(r => r.json())
+    .then(data => {
+      const tbody = document.getElementById('t2b-body');
+      const tfoot = document.getElementById('t2b-foot');
+      const info  = document.getElementById('t2b-info');
+      const meta  = document.getElementById('t2b-meta');
+      tbody.innerHTML = ''; tfoot.innerHTML = ''; meta.textContent = '';
+
+      if (data.message && !data.rows.length) {
+        info.innerHTML = `ℹ️ ${esc(data.message)}`;
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">No data.</td></tr>';
+        return;
+      }
+
+      // Info bar — show designation → QP stats + any unmapped designations
+      let infoHtml = `<b>${data.mapped_designations}</b> of <b>${data.total_designations}</b> designation(s) mapped → <b>${data.qp_count}</b> QP(s)`;
+      if (data.unmapped && data.unmapped.length) {
+        infoHtml += `<br><span style="color:#b45309;">⚠️ No QP mapping for: ${data.unmapped.map(d => esc(d)).join(', ')}</span>`;
+      }
+      info.innerHTML = infoHtml;
+
+      if (!data.rows.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">No BatchPlan rows found for the matched QPs.</td></tr>';
+        return;
+      }
+
+      data.rows.forEach(r => {
+        tbody.insertAdjacentHTML('beforeend',
+          `<tr>
+            <td>${esc(r.centre_name)}</td>
+            <td style="font-size:12px;">${esc(r.qp)}</td>
+            <td style="font-size:12px;">${esc(r.cluster)}</td>
+            <td style="font-size:12px;">${esc(r.sub_cluster)}</td>
+            <td class="num">${fmt(r.enrol)}</td>
+            <td class="num">${fmt(r.cert)}</td>
+            <td class="num">${fmt(r.place)}</td>
+          </tr>`);
+      });
+
+      const t = data.totals;
+      tfoot.innerHTML =
+        `<tr>
+           <td colspan="4">Total — ${t.rows} row(s)</td>
+           <td class="num">${fmt(t.enrol)}</td>
+           <td class="num">${fmt(t.cert)}</td>
+           <td class="num">${fmt(t.place)}</td>
+         </tr>`;
+      meta.textContent = `${t.rows} rows · ${data.qp_count} QP(s)`;
+    });
+}
+
+function buildWorksetuParams() {
+  // Combines SAHI filters + WorkSetu filters for supply/ITI APIs
+  const p = buildParams();
+  const empSC = document.getElementById('emp-sc-select').value;
+  const wsSC  = document.getElementById('ws-sc-select').value;
+  if (empSC) p.set('emp_sub_cluster',      empSC);
+  if (wsSC)  p.set('worksetu_sub_cluster', wsSC);
+  return p;
+}
+
+function reloadWorksetuOptions() {
+  const params = buildParams();  // SAHI filters only
+  const empSC = document.getElementById('emp-sc-select').value;
+  if (empSC) params.set('emp_sub_cluster', empSC);
+  fetch('/api/sahi/worksetu-filter/?' + params.toString())
+    .then(r => r.json())
+    .then(data => {
+      const curEmp = document.getElementById('emp-sc-select').value;
+      // WorkSetu value is only kept if it's still in the new (narrowed) list
+      const curWS  = document.getElementById('ws-sc-select').value;
+      const keepWS = data.worksetu_sub_clusters.includes(curWS) ? curWS : '';
+      setSelectOptions('emp-sc-select', data.emp_sub_clusters,      curEmp, 'All Employability Sub Clusters');
+      setSelectOptions('ws-sc-select',  data.worksetu_sub_clusters, keepWS, 'All WorkSetu Sub Clusters');
+      // Count badges so the user can SEE the list narrowed
+      document.getElementById('emp-sc-count').textContent =
+        data.emp_sub_clusters.length ? `(${data.emp_sub_clusters.length})` : '';
+      document.getElementById('ws-sc-count').textContent =
+        data.worksetu_sub_clusters.length ? `(${data.worksetu_sub_clusters.length})` : '';
+    });
+}
+
+function clearWorksetuFilters() {
+  document.getElementById('emp-sc-select').value = '';
+  document.getElementById('ws-sc-select').value  = '';
+  reloadWorksetuOptions();
+  loadSupplySummaryTable();
+  loadITIPolytechnicTable();
+}
+
+// WorkSetu cascade: Employability SC → narrows WorkSetu SC list
+document.getElementById('emp-sc-select').addEventListener('change', () => {
+  document.getElementById('ws-sc-select').value = '';
+  reloadWorksetuOptions();
+  loadSupplySummaryTable();
+  loadITIPolytechnicTable();
+});
+
+document.getElementById('ws-sc-select').addEventListener('change', () => {
+  loadSupplySummaryTable();
+  loadITIPolytechnicTable();
+});
+
+function loadSupplySummaryTable() {
+  const params = buildParams();
+  const tbody = document.getElementById('t4-body');
+  const tfoot = document.getElementById('t4-foot');
+  const info  = document.getElementById('t4-info');
+  const meta  = document.getElementById('t4-meta');
+  tbody.innerHTML = ''; tfoot.innerHTML = ''; meta.textContent = '';
+  fetch('/api/sahi/supply-summary/?' + buildWorksetuParams().toString())
+    .then(r => r.json())
+    .then(data => {
+      if (!data.mapped) {
+        info.innerHTML = `👉 ${esc(data.message)}`;
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">No data.</td></tr>';
+        return;
+      }
+      info.innerHTML = `Scope: <b>${esc(data.scope)}</b>` +
+                       (data.message ? `<br><small>${esc(data.message)}</small>` : '');
+      if (!data.rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">No associates found for this scope.</td></tr>';
+        return;
+      }
+      data.rows.forEach(r => {
+        tbody.insertAdjacentHTML('beforeend',
+          `<tr>
+            <td>${esc(r.supply_state)}</td>
+            <td>${esc(r.supply_district)}</td>
+            <td style="font-size:12px;">${esc(r.client)}</td>
+            <td>${esc(r.gender)}</td>
+            <td class="num">${fmt(r.count)}</td>
+          </tr>`);
+      });
+      const t = data.totals;
+      tfoot.innerHTML =
+        `<tr>
+           <td colspan="4">Total — ${t.states} state(s), ${t.districts} district(s), ${t.clients} client(s)</td>
+           <td class="num">${fmt(t.associates)}</td>
+         </tr>`;
+      meta.textContent = `${t.rows} rows · ${fmt(t.associates)} associates`;
+    });
+}
+
+function loadITIPolytechnicTable() {
+  const params = buildParams();
+  const tbody = document.getElementById('t5-body');
+  const info  = document.getElementById('t5-info');
+  const meta  = document.getElementById('t5-meta');
+  tbody.innerHTML = ''; meta.textContent = '';
+  fetch('/api/sahi/iti-polytechnic/?' + buildWorksetuParams().toString())
+    .then(r => r.json())
+    .then(data => {
+      if (!data.mapped) {
+        info.innerHTML = `👉 ${esc(data.message)}`;
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">No data.</td></tr>';
+        return;
+      }
+      const pinNote = (data.pins_in_scope !== undefined)
+        ? `<br><small>${fmt(data.pins_in_scope)} Supply PIN(s) in scope · ${fmt(data.totals.pins)} matched in directory</small>`
+        : '';
+      info.innerHTML = `Scope: <b>${esc(data.scope)}</b>${pinNote}` +
+                       (data.message ? `<br><small>${esc(data.message)}</small>` : '');
+      if (!data.rows.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">No ITI / Polytechnic colleges for the Supply PINs in this scope.</td></tr>';
+        return;
+      }
+      data.rows.forEach(r => {
+        const typeClass = (r.institution_type || '').toLowerCase() === 'iti'
+                          ? 'background:#dbeafe;color:#1e3a8a;'
+                          : 'background:#fce7f3;color:#9d174d;';
+        tbody.insertAdjacentHTML('beforeend',
+          `<tr>
+            <td>${esc(r.institution_name)}</td>
+            <td><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;${typeClass}">${esc(r.institution_type)}</span></td>
+            <td style="font-size:12px;color:var(--muted);">${esc(r.address_location)}</td>
+            <td style="font-family:monospace;font-size:12px;">${esc(r.supply_pin)}</td>
+          </tr>`);
+      });
+      const t = data.totals;
+      meta.textContent = `${t.rows} rows · ${t.iti} ITI · ${t.polytechnic} Polytechnic · ${t.pins} PIN(s)`;
+    });
+}
+
+function loadAllTables() {
   loadDemandTable();
   loadCentreTable();
+  loadQPBatchTable();
   loadDiplomaTable();
+  loadSupplySummaryTable();
+  loadITIPolytechnicTable();
   refreshMapCard();
 }
 
 function clearFilters() {
-  document.getElementById('cluster-select').value = '';
-  document.getElementById('sub-cluster-select').value = '';
-  refresh();
+  ['zone-select','region-select','cluster-select','sub-cluster-select','client-select',
+   'emp-sc-select','ws-sc-select']
+    .forEach(id => document.getElementById(id).value = '');
+  reloadFilterOptions();
+  reloadWorksetuOptions();
+  loadAllTables();
 }
 
-// Cascading: changing cluster resets sub-cluster
-document.getElementById('cluster-select').addEventListener('change', () => {
-  document.getElementById('sub-cluster-select').value = '';
-  reloadFilterOptions('');
-  loadDemandTable();
-  loadCentreTable();
-  loadDiplomaTable();
-  refreshMapCard();
+// ── Cascading event listeners ─────────────────────────────────────────────────
+// Each higher-level filter resets all downstream filters, refetches options, then reloads tables.
+
+document.getElementById('zone-select').addEventListener('change', () => {
+  ['region-select','cluster-select','sub-cluster-select','client-select']
+    .forEach(id => document.getElementById(id).value = '');
+  document.getElementById('emp-sc-select').value = '';
+  document.getElementById('ws-sc-select').value  = '';
+  reloadFilterOptions();
+  reloadWorksetuOptions();
+  loadAllTables();
 });
+
+document.getElementById('region-select').addEventListener('change', () => {
+  ['cluster-select','sub-cluster-select','client-select']
+    .forEach(id => document.getElementById(id).value = '');
+  document.getElementById('emp-sc-select').value = '';
+  document.getElementById('ws-sc-select').value  = '';
+  reloadFilterOptions();
+  reloadWorksetuOptions();
+  loadAllTables();
+});
+
+document.getElementById('cluster-select').addEventListener('change', () => {
+  ['sub-cluster-select','client-select']
+    .forEach(id => document.getElementById(id).value = '');
+  document.getElementById('emp-sc-select').value = '';
+  document.getElementById('ws-sc-select').value  = '';
+  reloadFilterOptions();
+  reloadWorksetuOptions();
+  loadAllTables();
+});
+
 document.getElementById('sub-cluster-select').addEventListener('change', () => {
-  loadDemandTable();
-  loadCentreTable();
-  loadDiplomaTable();
-  refreshMapCard();
+  document.getElementById('client-select').value = '';
+  document.getElementById('emp-sc-select').value = '';
+  document.getElementById('ws-sc-select').value  = '';
+  reloadFilterOptions();
+  reloadWorksetuOptions();
+  loadAllTables();
+});
+
+document.getElementById('client-select').addEventListener('change', () => {
+  document.getElementById('emp-sc-select').value = '';
+  document.getElementById('ws-sc-select').value  = '';
+  reloadWorksetuOptions();
+  loadAllTables();
 });
 
 // Bootstrap
-refresh();
+initialLoad();
 </script>
 {% endblock %}

@@ -1,0 +1,1491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Data Upload — ECP Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<!-- SheetJS for client-side XLSX column stripping -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#222637;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.14);
+  --text:#e2e8f0;--muted:#64748b;--accent:#C5002A;
+  --green:#10b981;--blue:#3b82f6;--gold:#f59e0b;--red:#ef4444;
+  --ff:'Inter',sans-serif;--ff-m:'DM Mono',monospace;
+}
+html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--ff)}
+.app{display:flex;flex-direction:column;min-height:100vh}
+
+/* HEADER */
+.header{
+  height:52px;flex-shrink:0;background:var(--surface);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 1.5rem;gap:.75rem;
+}
+.logo{display:flex;align-items:center;gap:.55rem}
+.logo-icon{width:28px;height:28px;border-radius:6px;background:var(--accent);
+  display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:800;color:#fff}
+.logo-text{font-size:.82rem;font-weight:700}
+.logo-text span{color:var(--accent);font-style:italic}
+.page-badge{
+  background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);
+  color:var(--gold);border-radius:6px;padding:.22rem .65rem;
+  font-size:.72rem;font-weight:700;font-family:var(--ff-m);
+}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:.6rem}
+.back-btn{
+  display:flex;align-items:center;gap:.3rem;font-size:.73rem;color:var(--muted);
+  background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+  padding:.25rem .65rem;text-decoration:none;transition:all .15s;
+}
+.back-btn:hover{color:var(--text);border-color:var(--border2)}
+.user-pill{display:flex;align-items:center;gap:.45rem;background:var(--surface2);
+  border:1px solid var(--border);border-radius:100px;padding:.18rem .5rem .18rem .28rem}
+.user-av{width:20px;height:20px;border-radius:50%;background:var(--gold);display:flex;
+  align-items:center;justify-content:center;font-size:.58rem;font-weight:700;color:#000}
+.user-nm{font-size:.67rem;font-weight:600}
+.user-rb{font-family:var(--ff-m);font-size:.53rem;font-weight:700;padding:.08rem .38rem;
+  border-radius:100px;background:#fef3c7;color:#92400e}
+.btn-logout{display:flex;align-items:center;gap:.28rem;background:rgba(239,68,68,.12);
+  border:1px solid rgba(239,68,68,.25);color:#f87171;border-radius:6px;padding:.22rem .5rem;
+  font-size:.67rem;font-weight:600;cursor:pointer;transition:all .15s;font-family:var(--ff)}
+.btn-logout:hover{background:rgba(239,68,68,.22);color:#fca5a5}
+
+/* MAIN */
+.main{flex:1;padding:1.5rem;max-width:1100px;margin:0 auto;width:100%}
+
+/* Stats strip */
+.stats-strip{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:.65rem;margin-bottom:1.5rem;
+}
+.stat-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:.7rem 1rem;position:relative;overflow:hidden;
+}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.sc-green::before{background:var(--green)}.sc-blue::before{background:var(--blue)}
+.sc-gold::before{background:var(--gold)}.sc-red::before{background:var(--accent)}
+.stat-lbl{font-family:var(--ff-m);font-size:.58rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:.25rem}
+.stat-val{font-size:1.6rem;font-weight:700;font-family:var(--ff-m)}
+.sc-green .stat-val{color:var(--green)}.sc-blue .stat-val{color:var(--blue)}
+.sc-gold .stat-val{color:var(--gold)}.sc-red .stat-val{color:var(--accent)}
+.stat-sub{font-size:.65rem;color:var(--muted);margin-top:.15rem}
+
+/* Upload cards grid */
+.upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem}
+.upload-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  overflow:hidden;
+}
+.uc-head{
+  padding:.9rem 1.1rem;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:.65rem;
+}
+.uc-icon{
+  width:36px;height:36px;border-radius:9px;display:flex;
+  align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;
+}
+.uc-title{font-size:.85rem;font-weight:700}
+.uc-mode{font-size:.65rem;font-family:var(--ff-m);font-weight:600;
+  padding:.12rem .45rem;border-radius:100px;margin-top:.2rem;display:inline-block}
+.mode-append{background:rgba(16,185,129,.12);color:var(--green);border:1px solid rgba(16,185,129,.25)}
+.mode-replace{background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.2)}
+.uc-body{padding:1rem 1.1rem}
+.uc-desc{font-size:.75rem;color:var(--muted);margin-bottom:1rem;line-height:1.6}
+.dedup-info{
+  background:var(--surface2);border:1px solid var(--border);border-radius:7px;
+  padding:.5rem .75rem;margin-bottom:.9rem;font-size:.7rem;color:var(--muted);
+}
+.dedup-info strong{color:var(--text)}
+
+/* File size preview badge */
+.size-preview{
+  display:none;margin-bottom:.65rem;padding:.4rem .7rem;border-radius:7px;
+  font-size:.7rem;font-family:var(--ff-m);
+  background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);color:var(--green);
+}
+.size-preview.warn{
+  background:rgba(245,158,11,.08);border-color:rgba(245,158,11,.2);color:var(--gold);
+}
+
+/* Drop zone */
+.drop-zone{
+  border:2px dashed var(--border2);border-radius:8px;
+  padding:1.5rem 1rem;text-align:center;cursor:pointer;
+  transition:all .2s;position:relative;
+}
+.drop-zone:hover,.drop-zone.drag-over{
+  border-color:var(--blue);background:rgba(59,130,246,.05);
+}
+.drop-zone input[type=file]{
+  position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;
+}
+.dz-icon{font-size:1.5rem;margin-bottom:.4rem}
+.dz-text{font-size:.78rem;font-weight:600;color:var(--text)}
+.dz-sub{font-size:.68rem;color:var(--muted);margin-top:.2rem}
+.dz-filename{
+  font-size:.72rem;font-family:var(--ff-m);color:var(--blue);
+  margin-top:.4rem;display:none;
+}
+
+/* Upload button */
+.btn-upload{
+  width:100%;margin-top:.75rem;padding:.6rem;
+  background:linear-gradient(135deg,#1a56db,#1043a8);
+  color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:600;
+  cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:.4rem;
+}
+.btn-upload:hover:not(:disabled){opacity:.9;transform:translateY(-1px)}
+.btn-upload:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+/* Progress bar */
+.progress-wrap{display:none;margin-top:.6rem}
+.progress-bar{height:5px;background:var(--surface2);border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;width:0;background:var(--blue);border-radius:3px;transition:width .3s}
+.progress-text{font-size:.65rem;color:var(--muted);margin-top:.3rem;font-family:var(--ff-m)}
+
+/* Result alert */
+.result-box{
+  display:none;margin-top:.65rem;padding:.6rem .8rem;border-radius:7px;font-size:.73rem;
+}
+.result-box.success{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);color:#6ee7b7}
+.result-box.error  {background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.25); color:#fca5a5}
+.result-box.info   {background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);color:#93c5fd}
+
+/* Activity log */
+.log-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.1rem;
+}
+.log-title{font-size:.82rem;font-weight:700;margin-bottom:.65rem;display:flex;align-items:center;gap:.4rem}
+.log-list{list-style:none;display:flex;flex-direction:column;gap:.4rem;max-height:320px;overflow-y:auto}
+
+/* Active upload row — shows live progress bar */
+.log-item{
+  display:flex;flex-direction:column;gap:.25rem;font-size:.71rem;
+  padding:.45rem .6rem;background:var(--surface2);border-radius:6px;
+  border-left:3px solid transparent;
+}
+.log-item.active { border-left-color:var(--blue); }
+.log-item.success{ border-left-color:var(--green); }
+.log-item.error  { border-left-color:var(--red); }
+.log-row1{display:flex;align-items:center;gap:.5rem}
+.log-time{font-family:var(--ff-m);color:var(--muted);flex-shrink:0;min-width:70px;font-size:.65rem}
+.log-msg{color:var(--text);flex:1;line-height:1.4}
+.log-tag{font-family:var(--ff-m);font-size:.6rem;font-weight:700;padding:.1rem .38rem;
+  border-radius:100px;flex-shrink:0}
+.tag-att {background:rgba(16,185,129,.15);color:var(--green)}
+.tag-fa  {background:rgba(59,130,246,.15);color:var(--blue)}
+.tag-ecp {background:rgba(245,158,11,.15);color:var(--gold)}
+.tag-comm{background:rgba(139,92,246,.15);color:#a78bfa}
+.tag-bp  {background:rgba(99,102,241,.15);color:#a5b4fc}
+.tag-err {background:rgba(239,68,68,.15);color:var(--red)}
+
+/* Mini progress bar inside log item */
+.log-prog-wrap{display:none;height:3px;background:var(--surface);border-radius:2px;overflow:hidden}
+.log-prog-fill{height:100%;width:0;border-radius:2px;transition:width .4s}
+.log-prog-fill.blue  {background:var(--blue)}
+.log-prog-fill.green {background:var(--green)}
+.log-prog-fill.red   {background:var(--red)}
+.log-step{font-size:.63rem;color:var(--muted);font-family:var(--ff-m);display:none}
+
+/* Live indicator */
+.live-dot{
+  width:8px;height:8px;border-radius:50%;background:var(--green);
+  display:inline-block;animation:pulse 1.5s infinite;
+}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.version-badge{
+  font-family:var(--ff-m);font-size:.6rem;color:var(--muted);
+  background:var(--surface2);border:1px solid var(--border);
+  padding:.15rem .45rem;border-radius:100px;
+}
+
+/* ── User Management Card (full-width, IT-only) ────────────────────────────── */
+.user-mgmt-section{display:block;margin-bottom:1.5rem}
+.user-mgmt-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+
+/* Tab nav */
+.um-tab-nav{display:flex;border-bottom:1px solid var(--border);background:var(--surface2)}
+.um-tab{flex:1;padding:.65rem 1rem;font-size:.78rem;font-weight:600;background:none;border:none;
+  color:var(--muted);cursor:pointer;transition:all .15s;font-family:var(--ff);
+  border-bottom:2px solid transparent;margin-bottom:-1px;}
+.um-tab:hover{color:var(--text);background:rgba(255,255,255,.03)}
+.um-tab.active{color:var(--text);border-bottom-color:var(--blue)}
+.um-user-count{display:inline-flex;align-items:center;justify-content:center;
+  background:var(--blue);color:#fff;border-radius:100px;
+  font-size:.6rem;font-weight:700;padding:.1rem .38rem;margin-left:.3rem;font-family:var(--ff-m)}
+
+/* Panels */
+.um-panel{}
+.umc-body{padding:1.1rem}
+
+/* Two column layout */
+.um-two-col{display:grid;grid-template-columns:380px 1fr;min-height:500px}
+@media(max-width:800px){.um-two-col{grid-template-columns:1fr}}
+.um-form-panel{padding:1.1rem;border-right:1px solid var(--border);overflow-y:auto;max-height:600px}
+.um-users-panel{padding:1.1rem}
+
+/* Form header */
+.um-form-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem}
+.um-form-header span{font-size:.85rem;font-weight:700}
+.um-clear-btn{background:none;border:1px solid var(--border);color:var(--muted);
+  border-radius:6px;padding:.2rem .5rem;font-size:.67rem;cursor:pointer;font-family:var(--ff)}
+.um-clear-btn:hover{color:var(--text);border-color:var(--border2)}
+
+/* form elements */
+.um-label{font-size:.72rem;font-weight:600;color:var(--muted);margin-bottom:.3rem;display:block}
+.um-input,.um-select{
+  width:100%;background:var(--surface2);border:1px solid var(--border2);
+  border-radius:7px;padding:.48rem .7rem;font-size:.78rem;color:var(--text);
+  font-family:var(--ff);outline:none;transition:border-color .15s;
+}
+.um-input:focus,.um-select:focus{border-color:var(--blue)}
+.um-select option{background:var(--surface2)}
+.um-field{margin-bottom:.75rem}
+.um-hint{font-size:.65rem;color:var(--muted);margin-top:.25rem;font-family:var(--ff-m)}
+
+/* Centre / Project checklist */
+.um-centre-list{
+  background:var(--surface2);border:1px solid var(--border2);border-radius:7px;
+  max-height:180px;overflow-y:auto;
+}
+.um-centre-item{
+  display:flex;align-items:center;gap:.5rem;padding:.38rem .65rem;
+  font-size:.73rem;cursor:pointer;transition:background .1s;border-bottom:1px solid var(--border);
+}
+.um-centre-item:last-child{border-bottom:none}
+.um-centre-item:hover{background:rgba(59,130,246,.07)}
+.um-centre-item input[type=checkbox]{accent-color:var(--blue);width:13px;height:13px;flex-shrink:0}
+.um-centre-name{flex:1;font-weight:500}
+.um-centre-id{font-size:.62rem;color:var(--muted);font-family:var(--ff-m)}
+
+/* Users list panel */
+.um-users-header{display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:.75rem;font-size:.82rem;font-weight:700}
+.um-user-row{
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  padding:.6rem .85rem;display:flex;align-items:center;gap:.65rem;
+}
+.um-user-av{width:32px;height:32px;border-radius:50%;background:var(--blue);
+  display:flex;align-items:center;justify-content:center;font-size:.72rem;
+  font-weight:700;color:#fff;flex-shrink:0}
+.um-user-info{flex:1;min-width:0}
+.um-user-name{font-size:.78rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.um-user-email{font-size:.65rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.um-user-ecode{font-size:.62rem;color:var(--muted);font-family:var(--ff-m)}
+.um-role-badge{font-size:.6rem;font-weight:700;padding:.12rem .4rem;border-radius:100px;
+  flex-shrink:0;font-family:var(--ff-m)}
+.role-cm{background:rgba(16,185,129,.15);color:var(--green);border:1px solid rgba(16,185,129,.3)}
+.role-pm{background:rgba(59,130,246,.15);color:var(--blue);border:1px solid rgba(59,130,246,.3)}
+.role-cmp{background:rgba(245,158,11,.15);color:var(--gold);border:1px solid rgba(245,158,11,.3)}
+.role-it{background:rgba(139,92,246,.15);color:#a78bfa;border:1px solid rgba(139,92,246,.3)}
+.um-scope-txt{font-size:.62rem;color:var(--muted);min-width:60px;text-align:center;font-family:var(--ff-m)}
+.um-user-actions{display:flex;gap:.35rem;flex-shrink:0}
+.btn-edit{background:var(--surface);border:1px solid var(--border2);color:var(--text);
+  border-radius:6px;padding:.22rem .55rem;font-size:.67rem;cursor:pointer;font-family:var(--ff);font-weight:600}
+.btn-edit:hover{border-color:var(--blue);color:var(--blue)}
+.btn-disable{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#f87171;
+  border-radius:6px;padding:.22rem .55rem;font-size:.67rem;cursor:pointer;font-family:var(--ff);font-weight:600}
+.btn-disable:hover{background:rgba(239,68,68,.2)}
+.btn-enable{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);color:var(--green);
+  border-radius:6px;padding:.22rem .55rem;font-size:.67rem;cursor:pointer;font-family:var(--ff);font-weight:600}
+
+/* action buttons in user card */
+.btn-create-user{
+  width:100%;padding:.65rem;margin-top:.5rem;
+  background:linear-gradient(135deg,#1a56db,#1043a8);
+  color:#fff;border:none;border-radius:7px;font-size:.8rem;font-weight:600;
+  cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:.4rem;
+}
+.btn-create-user:hover:not(:disabled){opacity:.9;transform:translateY(-1px)}
+.btn-create-user:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.um-result{display:none;margin-top:.7rem;padding:.6rem .8rem;border-radius:7px;font-size:.73rem;}
+.um-result.success{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);color:#6ee7b7}
+.um-result.error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#fca5a5}
+.mode-upsert{background:rgba(59,130,246,.12);color:#93c5fd;border:1px solid rgba(59,130,246,.25)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">EC</div>
+      <div class="logo-text">ECP <span>Impact</span> Dashboard</div>
+    </div>
+    <div class="page-badge">⬆ IT — Data Upload</div>
+    <div class="hdr-right">
+      <a href="/" class="back-btn">← Dashboard</a>
+      <div class="user-pill">
+        <div class="user-av" id="user-av">?</div>
+        <span class="user-nm" id="user-nm">…</span>
+        <span class="user-rb" id="user-rb"></span>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">
+        <svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 4.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L14.586 11H7a1 1 0 110-2h7.586l-1.293-1.293a1 1 0 010-1.414z" clip-rule="evenodd"/>
+        </svg>Sign Out
+      </button>
+    </div>
+  </header>
+
+  <div class="main">
+
+    <!-- Stats Strip -->
+    <div class="stats-strip">
+      <div class="stat-card sc-green">
+        <div class="stat-lbl">Candidates</div>
+        <div class="stat-val" id="st-cand">—</div>
+        <div class="stat-sub">In master</div>
+      </div>
+      <div class="stat-card sc-blue">
+        <div class="stat-lbl">Attendance Rows</div>
+        <div class="stat-val" id="st-att">—</div>
+        <div class="stat-sub">Session records</div>
+      </div>
+      <div class="stat-card sc-gold">
+        <div class="stat-lbl">FA Rows</div>
+        <div class="stat-val" id="st-fa">—</div>
+        <div class="stat-sub">Assessment records</div>
+      </div>
+      <div class="stat-card sc-red">
+        <div class="stat-lbl">Community Rows</div>
+        <div class="stat-val" id="st-comm">—</div>
+        <div class="stat-sub">Location records</div>
+      </div>
+      <div class="stat-card sc-blue">
+        <div class="stat-lbl">Compliance Rows</div>
+        <div class="stat-val" id="st-compl">—</div>
+        <div class="stat-sub">Validation records</div>
+      </div>
+    </div>
+
+    <!-- Upload Cards -->
+    <div class="upload-grid">
+
+      <!-- Attendance -->
+      <div class="upload-card">
+        <div class="uc-head">
+          <div class="uc-icon" style="background:rgba(16,185,129,.12)">📊</div>
+          <div>
+            <div class="uc-title">Attendance Data</div>
+            <span class="uc-mode mode-append">Append + Replace</span>
+          </div>
+        </div>
+        <div class="uc-body">
+          <div class="uc-desc">Upload today's session attendance. New records are appended; existing sessions (same Batch + Candidate + Session ID) are overwritten. <strong style="color:var(--green)">Auto-trims to required columns before upload.</strong></div>
+          <div class="dedup-info">
+            <strong>Dedup key:</strong> Batch ID + Candidate ID + Session ID
+          </div>
+          <div class="size-preview" id="sp-att"></div>
+          <div class="drop-zone" id="dz-att">
+            <input type="file" id="file-att" accept=".xlsx,.csv,.xls" onchange="onFileSelect('att')"/>
+            <div class="dz-icon">📁</div>
+            <div class="dz-text">Drop file here or click to browse</div>
+            <div class="dz-sub">Accepts .xlsx or .csv (XLSX format)</div>
+            <div class="dz-filename" id="fn-att"></div>
+          </div>
+          <button class="btn-upload" id="btn-att" onclick="doUpload('att')" disabled>
+            ⬆ Upload Attendance
+          </button>
+          <div class="progress-wrap" id="pw-att">
+            <div class="progress-bar"><div class="progress-fill" id="pf-att"></div></div>
+            <div class="progress-text" id="pt-att">Processing…</div>
+          </div>
+          <div class="result-box" id="rb-att"></div>
+        </div>
+      </div>
+
+      <!-- Compliance -->
+      <div class="upload-card">
+        <div class="uc-head">
+          <div class="uc-icon" style="background:rgba(139,92,246,.12)">🛡️</div>
+          <div>
+            <div class="uc-title">Compliance Data</div>
+            <span class="uc-mode mode-append">Append + Replace</span>
+          </div>
+        </div>
+        <div class="uc-body">
+          <div class="uc-desc">Upload candidate validation / compliance records. New rows are appended to the master; existing entries (same Batch + Candidate) are overwritten by the latest record. <strong style="color:var(--green)">Auto-trims to required columns before upload.</strong></div>
+          <div class="dedup-info">
+            <strong>Dedup key:</strong> BATCHCODE + ENROLLMENTID (latest Date wins)
+          </div>
+          <div class="size-preview" id="sp-compliance"></div>
+          <div class="drop-zone" id="dz-compliance">
+            <input type="file" id="file-compliance" accept=".xlsx,.csv,.xls" onchange="onFileSelect('compliance')"/>
+            <div class="dz-icon">📁</div>
+            <div class="dz-text">Drop file here or click to browse</div>
+            <div class="dz-sub">Accepts .xlsx or .csv (XLSX format)</div>
+            <div class="dz-filename" id="fn-compliance"></div>
+          </div>
+          <button class="btn-upload" id="btn-compliance" onclick="doUpload('compliance')" disabled>
+            ⬆ Upload Compliance
+          </button>
+          <div class="progress-wrap" id="pw-compliance">
+            <div class="progress-bar"><div class="progress-fill" id="pf-compliance"></div></div>
+            <div class="progress-text" id="pt-compliance">Processing…</div>
+          </div>
+          <div class="result-box" id="rb-compliance"></div>
+        </div>
+      </div>
+
+      <!-- FA -->
+      <div class="upload-card">
+        <div class="uc-head">
+          <div class="uc-icon" style="background:rgba(59,130,246,.12)">📝</div>
+          <div>
+            <div class="uc-title">Formative Assessment (FA)</div>
+            <span class="uc-mode mode-append">Append + Replace</span>
+          </div>
+        </div>
+        <div class="uc-body">
+          <div class="uc-desc">Upload new FA records. Appended to master; existing assessments (same Batch + Candidate + Module) are overwritten. <strong style="color:var(--green)">Auto-trims to required columns before upload.</strong></div>
+          <div class="dedup-info">
+            <strong>Dedup key:</strong> Batch ID + Candidate ID + Module Name + Topic Name
+          </div>
+          <div class="size-preview" id="sp-fa"></div>
+          <div class="drop-zone" id="dz-fa">
+            <input type="file" id="file-fa" accept=".xlsx,.csv,.xls" onchange="onFileSelect('fa')"/>
+            <div class="dz-icon">📁</div>
+            <div class="dz-text">Drop file here or click to browse</div>
+            <div class="dz-sub">Accepts .xlsx or .csv (XLSX format)</div>
+            <div class="dz-filename" id="fn-fa"></div>
+          </div>
+          <button class="btn-upload" id="btn-fa" onclick="doUpload('fa')" disabled>
+            ⬆ Upload FA Data
+          </button>
+          <div class="progress-wrap" id="pw-fa">
+            <div class="progress-bar"><div class="progress-fill" id="pf-fa"></div></div>
+            <div class="progress-text" id="pt-fa">Processing…</div>
+          </div>
+          <div class="result-box" id="rb-fa"></div>
+        </div>
+      </div>
+
+      <!-- ECP -->
+      <div class="upload-card">
+        <div class="uc-head">
+          <div class="uc-icon" style="background:rgba(245,158,11,.12)">🗂️</div>
+          <div>
+            <div class="uc-title">ECP Candidate Data</div>
+            <span class="uc-mode mode-replace">⚠ Full Replace</span>
+          </div>
+        </div>
+        <div class="uc-body">
+          <div class="uc-desc">Replaces the entire ECP candidate master. <strong style="color:var(--green)">✂ Only the 31 required columns are saved — extra unused columns are discarded. Files under 80 MB are trimmed in-browser; files above 80 MB (e.g. your 300 MB export) are uploaded directly and trimmed on the server.</strong> No hanging, no blank page.</div>
+          <div class="dedup-info" style="border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.05)">
+            ⚠ <strong>Warning:</strong> This overwrites all candidate data. Upload the full ECP export — extra columns are stripped automatically.
+          </div>
+          <div class="size-preview" id="sp-ecp"></div>
+          <div class="drop-zone" id="dz-ecp">
+            <input type="file" id="file-ecp" accept=".xlsx,.csv,.xls" onchange="onFileSelect('ecp')"/>
+            <div class="dz-icon">📁</div>
+            <div class="dz-text">Drop file here or click to browse</div>
+            <div class="dz-sub">Accepts .xlsx or .csv — extra columns auto-removed</div>
+            <div class="dz-filename" id="fn-ecp"></div>
+          </div>
+          <button class="btn-upload" id="btn-ecp" onclick="doUpload('ecp')" disabled>
+            ⬆ Upload ECP Data
+          </button>
+          <div class="progress-wrap" id="pw-ecp">
+            <div class="progress-bar"><div class="progress-fill" id="pf-ecp"></div></div>
+            <div class="progress-text" id="pt-ecp">Processing…</div>
+          </div>
+          <div class="result-box" id="rb-ecp"></div>
+        </div>
+      </div>
+
+      <!-- Community -->
+      <div class="upload-card">
+        <div class="uc-head">
+          <div class="uc-icon" style="background:rgba(139,92,246,.12)">🗺️</div>
+          <div>
+            <div class="uc-title">Center & Community Master</div>
+            <span class="uc-mode mode-replace">⚠ Full Replace</span>
+          </div>
+        </div>
+        <div class="uc-body">
+          <div class="uc-desc">Replaces the entire Community & Centre master. Upload the latest Center_and_Community_master.xlsx. All location data will be replaced.</div>
+          <div class="dedup-info" style="border-color:rgba(139,92,246,.2);background:rgba(139,92,246,.05)">
+            ⚠ <strong>Warning:</strong> This overwrites all community location data.
+          </div>
+          <div class="size-preview" id="sp-community"></div>
+          <div class="drop-zone" id="dz-community">
+            <input type="file" id="file-community" accept=".xlsx,.csv,.xls" onchange="onFileSelect('community')"/>
+            <div class="dz-icon">📁</div>
+            <div class="dz-text">Drop file here or click to browse</div>
+            <div class="dz-sub">Accepts .xlsx</div>
+            <div class="dz-filename" id="fn-community"></div>
+          </div>
+          <button class="btn-upload" id="btn-community" onclick="doUpload('community')" disabled>
+            ⬆ Upload Community Master
+          </button>
+          <div class="progress-wrap" id="pw-community">
+            <div class="progress-bar"><div class="progress-fill" id="pf-community"></div></div>
+            <div class="progress-text" id="pt-community">Processing…</div>
+          </div>
+          <div class="result-box" id="rb-community"></div>
+        </div>
+      </div>
+
+
+      <!-- Batch Plan -->
+      <div class="upload-card">
+        <div class="uc-head">
+          <div class="uc-icon" style="background:rgba(59,130,246,.12)">📋</div>
+          <div>
+            <div class="uc-title">Batch Plan Data</div>
+            <span class="uc-mode mode-replace">⚠ Full Replace</span>
+          </div>
+        </div>
+        <div class="uc-body">
+          <div class="uc-desc">Replaces the entire batch plan data. Upload the latest batch plan export. All batch planning data will be replaced.</div>
+          <div class="dedup-info" style="border-color:rgba(59,130,246,.2);background:rgba(59,130,246,.05)">
+            ⚠ <strong>Warning:</strong> This overwrites all batch plan data.
+          </div>
+          <div class="size-preview" id="sp-batch_plan"></div>
+          <div class="drop-zone" id="dz-batch_plan">
+            <input type="file" id="file-batch_plan" accept=".xlsx,.csv,.xls" onchange="onFileSelect('batch_plan')"/>
+            <div class="dz-icon">📁</div>
+            <div class="dz-text">Drop file here or click to browse</div>
+            <div class="dz-sub">Accepts .xlsx or .csv (XLSX format)</div>
+            <div class="dz-filename" id="fn-batch_plan"></div>
+          </div>
+          <button class="btn-upload" id="btn-batch_plan" onclick="doUpload('batch_plan')" disabled>
+            ⬆ Upload Batch Plan
+          </button>
+          <div class="progress-wrap" id="pw-batch_plan">
+            <div class="progress-bar"><div class="progress-fill" id="pf-batch_plan"></div></div>
+            <div class="progress-text" id="pt-batch_plan">Processing…</div>
+          </div>
+          <div class="result-box" id="rb-batch_plan"></div>
+        </div>
+      </div>
+
+    </div><!-- /upload-grid -->
+
+    <!-- ── User Management (IT-only) ───────────────────────────────────────── -->
+    <div class="user-mgmt-section" id="user-mgmt-section">
+      <div class="user-mgmt-card">
+
+        <!-- Tab Nav -->
+        <div class="um-tab-nav">
+          <button class="um-tab active" id="tab-upload" onclick="switchUmTab('upload')">⬆ Data Upload</button>
+          <button class="um-tab" id="tab-users" onclick="switchUmTab('users')">👥 User Management <span class="um-user-count" id="um-user-count">0</span></button>
+        </div>
+
+        <!-- ── TAB: Data Upload (bulk) ─────────────────────────────────────── -->
+        <div id="um-panel-upload" class="um-panel">
+          <div class="umc-body">
+            <div class="um-section-title">📂 Bulk Upload — User_Master.xlsx</div>
+            <div class="uc-desc" style="margin-bottom:.75rem">
+              Upload your <strong>User_Master.xlsx</strong> to create or update multiple users at once.
+              Required columns: <code style="font-size:.7rem;color:var(--gold)">Ecode · Employee Name · Email · Role · Mapped Centre IDs · Mapped Projects · Active</code>.
+            </div>
+            <div class="dedup-info" style="border-color:rgba(16,185,129,.2);background:rgba(16,185,129,.05)">
+              ℹ <strong>Upsert mode:</strong> Rows whose email already exists are updated; new emails are inserted. Nothing is deleted.
+            </div>
+            <div class="size-preview" id="sp-user_master"></div>
+            <div class="drop-zone" id="dz-user_master">
+              <input type="file" id="file-user_master" accept=".xlsx,.xls" onchange="onFileSelect('user_master')"/>
+              <div class="dz-icon">📁</div>
+              <div class="dz-text">Drop User_Master.xlsx here or click to browse</div>
+              <div class="dz-sub">Accepts .xlsx only</div>
+              <div class="dz-filename" id="fn-user_master"></div>
+            </div>
+            <button class="btn-upload" id="btn-user_master" onclick="doUpload('user_master')" disabled>
+              ⬆ Upload User Master
+            </button>
+            <div class="progress-wrap" id="pw-user_master">
+              <div class="progress-bar"><div class="progress-fill" id="pf-user_master"></div></div>
+              <div class="progress-text" id="pt-user_master">Processing…</div>
+            </div>
+            <div class="result-box" id="rb-user_master"></div>
+          </div>
+        </div>
+
+        <!-- ── TAB: User Management ────────────────────────────────────────── -->
+        <div id="um-panel-users" class="um-panel" style="display:none">
+          <div class="um-two-col">
+
+            <!-- LEFT: Create / Edit Form -->
+            <div class="um-form-panel">
+              <div class="um-form-header">
+                <span id="um-form-title">➕ Create New User</span>
+                <button class="um-clear-btn" onclick="umClearForm()">✕ Clear</button>
+              </div>
+              <div class="um-hint" style="margin-bottom:.75rem">Fill all required fields</div>
+
+              <div class="um-field">
+                <label class="um-label">Employee Name <span style="color:var(--red)">*</span></label>
+                <input class="um-input" id="um-name" type="text" placeholder="Full name" autocomplete="off"/>
+              </div>
+              <div class="um-field">
+                <label class="um-label">Work Email <span style="color:var(--red)">*</span></label>
+                <input class="um-input" id="um-email" type="email" placeholder="user@sambhavfoundation.org" autocomplete="off"/>
+                <div class="um-hint">Used to login. If email exists, record will be updated.</div>
+              </div>
+              <div class="um-field">
+                <label class="um-label">Employee Code (Password) <span style="color:var(--red)">*</span></label>
+                <input class="um-input" id="um-ecode" type="text" placeholder="e.g. 311750" autocomplete="off"/>
+              </div>
+              <div class="um-field">
+                <label class="um-label">Role <span style="color:var(--red)">*</span></label>
+                <select class="um-select" id="um-role" onchange="onRoleChange()">
+                  <option value="Centre Manager">Centre Manager</option>
+                  <option value="Project Manager">Project Manager</option>
+                  <option value="CMP">CMP (full access)</option>
+                  <option value="IT">IT (upload &amp; admin)</option>
+                </select>
+              </div>
+
+              <!-- Assigned Centres (Centre Manager) -->
+              <div class="um-field" id="um-centres-field">
+                <label class="um-label">Assigned Centres <span style="font-size:.65rem;color:var(--muted)">(multi-select)</span></label>
+                <input class="um-input" id="um-centre-filter" placeholder="Filter centres..." oninput="umFilterCentres()" style="margin-bottom:.4rem"/>
+                <div class="um-centre-list" id="um-centre-list">
+                  <div style="color:var(--muted);font-size:.72rem;padding:.5rem">Loading centres...</div>
+                </div>
+              </div>
+
+              <!-- Assigned Projects (Project Manager) -->
+              <div class="um-field" id="um-projects-field" style="display:none">
+                <label class="um-label">Assigned Projects <span style="font-size:.65rem;color:var(--muted)">(multi-select)</span></label>
+                <input class="um-input" id="um-project-filter" placeholder="Filter projects..." oninput="umFilterProjects()" style="margin-bottom:.4rem"/>
+                <div class="um-centre-list" id="um-project-list">
+                  <div style="color:var(--muted);font-size:.72rem;padding:.5rem">Loading projects...</div>
+                </div>
+              </div>
+
+              <!-- Full access info -->
+              <div id="um-fullaccess-info" style="display:none;padding:.65rem .8rem;background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.2);border-radius:7px;font-size:.72rem;color:var(--muted);margin-bottom:.75rem">
+                ✅ <strong style="color:var(--green)">Full access</strong> — no centre or project mapping needed.
+              </div>
+
+              <div class="um-field">
+                <label class="um-label" style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+                  <input type="checkbox" id="um-active" checked style="width:14px;height:14px;accent-color:var(--green)"/>
+                  <span>Active (user can log in)</span>
+                </label>
+              </div>
+
+              <button class="btn-create-user" id="btn-create-user" onclick="doCreateUser()">
+                💾 Save User
+              </button>
+              <div class="um-result" id="um-result"></div>
+            </div>
+
+            <!-- RIGHT: All Users List -->
+            <div class="um-users-panel">
+              <div class="um-users-header">
+                <span>All Users <span class="um-user-count" id="um-user-count2">0</span></span>
+                <input class="um-input" id="um-search" placeholder="Search users..." oninput="umFilterUsers()" style="width:160px;padding:.3rem .6rem;font-size:.72rem"/>
+              </div>
+              <div id="um-users-list" style="display:flex;flex-direction:column;gap:.4rem;max-height:520px;overflow-y:auto">
+                <div style="color:var(--muted);font-size:.75rem;padding:1rem;text-align:center">Loading users...</div>
+              </div>
+            </div>
+
+          </div><!-- /um-two-col -->
+
+          <!-- ── Session Stats (who is using the dashboard) ─────────────────── -->
+          <div style="margin-top:1.5rem;background:var(--card-bg,#1a1a2e);border:1px solid var(--border,#2a2a3e);border-radius:10px;padding:1.25rem">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem">
+              <div>
+                <span style="font-weight:600;font-size:.9rem">📊 Dashboard Usage — Active Sessions</span>
+                <span id="session-active-count" style="margin-left:.75rem;font-size:.75rem;color:#22c55e;font-weight:600"></span>
+              </div>
+              <button onclick="loadSessionStats()" style="background:var(--accent,#4f46e5);color:#fff;border:none;border-radius:6px;padding:.3rem .75rem;font-size:.75rem;cursor:pointer">⟳ Refresh</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+                <thead>
+                  <tr style="border-bottom:1px solid var(--border,#2a2a3e);color:var(--muted,#888)">
+                    <th style="text-align:left;padding:.45rem .5rem;font-weight:500">Name</th>
+                    <th style="text-align:left;padding:.45rem .5rem;font-weight:500">Email</th>
+                    <th style="text-align:left;padding:.45rem .5rem;font-weight:500">Role</th>
+                    <th style="text-align:left;padding:.45rem .5rem;font-weight:500">Login At</th>
+                    <th style="text-align:left;padding:.45rem .5rem;font-weight:500">Last Seen</th>
+                    <th style="text-align:left;padding:.45rem .5rem;font-weight:500">IP</th>
+                  </tr>
+                </thead>
+                <tbody id="session-stats-body">
+                  <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1.5rem">Click Refresh to load</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="margin-top:.6rem;font-size:.7rem;color:var(--muted,#888)">
+              🟢 Green = online in last 10 minutes &nbsp;|&nbsp; Records show last 200 logins
+            </div>
+          </div>
+
+        </div><!-- /um-panel-users -->
+
+      </div><!-- /user-mgmt-card -->
+    </div><!-- /user-mgmt-section -->
+
+    <!-- Activity Log -->
+    <div class="log-card">
+      <div class="log-title">
+        <span class="live-dot"></span>
+        Activity Log
+        <span class="version-badge" id="ver-badge">v—</span>
+        <span style="margin-left:auto;font-size:.65rem;color:var(--muted);font-family:var(--ff-m)" id="last-reload-txt"></span>
+      </div>
+      <ul class="log-list" id="log-list">
+        <li class="log-item">
+          <div class="log-row1">
+            <span class="log-time">—</span>
+            <span class="log-msg">Waiting for uploads…</span>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// REQUIRED COLUMNS — only these are kept per upload type.
+// Extra columns in the source file are dropped in-browser before upload.
+// ─────────────────────────────────────────────────────────────────────────────
+const REQUIRED_COLS = {
+  ecp: [
+    "Batch ID","Candidate ID","Candidate Last Status",
+    "Project Name","Sub Project Name",
+    "Centre ID","Centre Name","Centre Type",
+    "Batch Actual Start Date","Batch Actual End Date",
+    "Candidate Name","Candidate Gender","Candidate Age","Candidate Phone",
+    "Present State","Present District",
+    "Course Name","QP Name",
+    "Highest Qualification",
+    "Has Assessed","Has Placed",
+    "Assessment Certification Status",
+    "Assessment Actual Certification Date",
+    "Placed Date",
+    "Employment Type","Job Title",
+    "Placement Company Or Branch Name",
+    "Education Details","Family Details",
+    "Course Sector","Present Address"
+  ],
+  att: [
+    "Batch ID","Candidate ID","Session ID","Module ID","Module Name",
+    "Session Date","Session Trainer Name","Attendance Status",
+    "Geo Coordinates","Session Photos","Session Updated By"
+  ],
+  fa: [
+    "Batch ID","Candidate ID","Module Name","Topic Name",
+    "Actual Marks","Pass Marks",
+    "Pass/Fail/Attempted","Evaluation Status","Evaluated ON",
+    "Module Schedule Start Date","Module Schedule By"
+  ],
+  compliance: [
+    // Source file columns — also accept canonical names
+    "BATCHCODE","ENROLLMENTID","COURSE Name","Sub Project Name",
+    "New Criteria","Age","Remarks of Validation","Remark 2",
+    "Short Remark","Date"
+  ],
+  community:    null,   // small file — no stripping needed
+  batch_plan:   null,
+  user_master:  null,   // small file — upload raw, server parses
+};
+
+// Stores trimmed CSV blobs after in-browser processing
+const _trimmedBlobs = {};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User session
+// ─────────────────────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    let res, retries = 3;
+    while (retries-- > 0) {
+      res = await fetch('/api/auth/me');
+      if (res.status !== 401) break;
+      await new Promise(r => setTimeout(r, 700));
+    }
+    if (!res || res.status === 401) { window.location.href = '/login'; return; }
+    const d = await res.json();
+    if (!['IT','CMP'].includes(d.role)) { window.location.href = '/'; return; }
+    const init = d.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    document.getElementById('user-av').textContent = init;
+    document.getElementById('user-nm').textContent = d.name;
+    document.getElementById('user-rb').textContent = d.role;
+    // Always show User Management on upload page (page itself is IT/CMP protected)
+    document.getElementById('user-mgmt-section').style.display = '';
+  } catch(e) { window.location.href = '/login'; }
+})();
+
+async function doLogout() {
+  if (!confirm('Sign out?')) return;
+  await fetch('/api/auth/logout', {method:'POST'});
+  window.location.href = '/login';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Drag & drop
+// ─────────────────────────────────────────────────────────────────────────────
+['att','fa','ecp','community','batch_plan','user_master','compliance'].forEach(key => {
+  const dz = document.getElementById('dz-' + key);
+  if (!dz) return;
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    document.getElementById('file-' + key).files = e.dataTransfer.files;
+    onFileSelect(key);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LARGE FILE THRESHOLD — files above this are uploaded raw (no browser parsing)
+// SheetJS loads the full file into RAM and expands it 3–5×. A 300 MB XLSX
+// becomes ~1.5 GB in the browser → Chrome "Out of Memory" / "Aw, Snap!" crash.
+// Above 80 MB we skip the trim step and let the server handle all parsing.
+// ─────────────────────────────────────────────────────────────────────────────
+const LARGE_FILE_THRESHOLD_MB = 80;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onFileSelect — show filename, strip columns in-browser, show size reduction
+// ─────────────────────────────────────────────────────────────────────────────
+async function onFileSelect(key) {
+  const inp  = document.getElementById('file-' + key);
+  if (!inp.files.length) return;
+  const file = inp.files[0];
+
+  const fn  = document.getElementById('fn-' + key);
+  fn.textContent   = '📎 ' + file.name;
+  fn.style.display = 'block';
+
+  const btn = document.getElementById('btn-' + key);
+  const sp  = document.getElementById('sp-' + key);
+  const pt  = document.getElementById('pt-' + key);
+  const pw  = document.getElementById('pw-' + key);
+  const pf  = document.getElementById('pf-' + key);
+
+  btn.disabled = true;
+  hideResult(key);
+
+  const requiredCols = REQUIRED_COLS[key];
+
+  const fileMB = file.size / 1024 / 1024;
+  const mb     = fileMB.toFixed(1);
+
+  // ── No stripping needed for community / batch_plan ──────────────────────
+  if (!requiredCols) {
+    sp.innerHTML     = `📄 <strong style="color:var(--text)">${file.name}</strong>  •  ${mb} MB`;
+    sp.className     = 'size-preview';
+    sp.style.display = 'block';
+    _trimmedBlobs[key] = { blob: file, name: file.name, originalMB: mb, trimmedMB: mb };
+    btn.disabled = false;
+    return;
+  }
+
+  // ── LARGE FILE BYPASS — skip browser parsing to avoid OOM crash ──────────
+  // SheetJS must load the entire file into RAM and expands it 3–5×.
+  // A 300 MB XLSX → ~1.5 GB in Chrome → "Aw, Snap! Out of Memory" crash.
+  // For files above the threshold we upload the raw file directly; the
+  // Django server handles all parsing (openpyxl read_only=True streaming).
+  if (fileMB > LARGE_FILE_THRESHOLD_MB) {
+    sp.innerHTML     = `🚀 <strong style="color:var(--text)">${file.name}</strong>  •  ${mb} MB — large file detected, uploading directly (server will parse)`;
+    sp.className     = 'size-preview';
+    sp.style.display = 'block';
+    _trimmedBlobs[key] = { blob: file, name: file.name, originalMB: mb, trimmedMB: mb };
+    btn.disabled = false;
+    addLog(key, `Large file (${mb} MB) — skipping browser trim, uploading raw`, 'success');
+    return;
+  }
+
+  // ── Small file path — strip columns in-browser to reduce upload size ─────
+  // Show processing state
+  sp.textContent   = '⏳ Reading file and stripping unused columns…';
+  sp.className     = 'size-preview warn';
+  sp.style.display = 'block';
+  pw.style.display = 'block';
+  pf.style.width   = '5%';
+  if (pt) pt.textContent = 'Reading file…';
+
+  try {
+    const originalMB = mb;
+    const csvBlob    = await stripColumns(file, requiredCols, pf, pt);
+    const trimmedMB  = (csvBlob.size / 1024 / 1024).toFixed(1);
+
+    _trimmedBlobs[key] = {
+      blob:       csvBlob,
+      name:       file.name.replace(/\.(xlsx?|csv)$/i, '_slim.csv'),
+      originalMB, trimmedMB,
+    };
+
+    pf.style.width   = '100%';
+    if (pt) pt.textContent = 'Ready to upload';
+    setTimeout(() => { pw.style.display = 'none'; pf.style.width = '0%'; }, 1200);
+
+    sp.className   = 'size-preview';
+    sp.innerHTML   = `✂ <strong style="color:var(--text)">${originalMB} MB → ${trimmedMB} MB</strong> &nbsp;&nbsp;${requiredCols.length} required columns kept — ready to upload`;
+    sp.style.display = 'block';
+    btn.disabled = false;
+    addLog(key, `✂ Trimmed: ${originalMB} MB → ${trimmedMB} MB (${requiredCols.length} cols kept)`, 'success');
+
+  } catch (err) {
+    sp.textContent   = '❌ Error reading file: ' + err.message;
+    sp.className     = 'size-preview warn';
+    pw.style.display = 'none';
+    btn.disabled     = false;   // let user retry
+    addLog(key, 'File read error: ' + err.message, 'error');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// stripColumns — read XLSX/CSV in browser using SheetJS,
+// keep only requiredCols, return a lean CSV Blob.
+// ─────────────────────────────────────────────────────────────────────────────
+function stripColumns(file, requiredCols, pfEl, ptEl) {
+  return new Promise((resolve, reject) => {
+    const reader   = new FileReader();
+    reader.onerror = () => reject(new Error('FileReader failed'));
+    reader.onload  = (e) => {
+      try {
+        if (ptEl) ptEl.textContent = 'Parsing workbook…';
+        if (pfEl) pfEl.style.width = '25%';
+
+        const data = new Uint8Array(e.target.result);
+        const wb   = XLSX.read(data, { type: 'array', cellDates: true, dateNF: 'yyyy-mm-dd' });
+        const ws   = wb.Sheets[wb.SheetNames[0]];
+
+        if (ptEl) ptEl.textContent = 'Extracting required columns…';
+        if (pfEl) pfEl.style.width = '55%';
+
+        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false, dateNF: 'yyyy-mm-dd' });
+        if (!aoa.length) throw new Error('File appears to be empty');
+
+        const headerRow  = aoa[0].map(h => String(h || '').trim());
+        const normalise  = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+        const headerNorm = headerRow.map(normalise);
+        const reqNorm    = requiredCols.map(normalise);
+
+        // Map each required col to its index in the source file (-1 = not found)
+        const colIndices = reqNorm.map(rn => headerNorm.indexOf(rn));
+
+        // Warn if key columns are missing
+        const missing = requiredCols.filter((_, i) => colIndices[i] === -1);
+        if (missing.length > 10) {
+          console.warn('Many columns not found in file:', missing);
+        }
+
+        if (ptEl) ptEl.textContent = 'Building CSV…';
+        if (pfEl) pfEl.style.width = '80%';
+
+        // Build output: header + data rows
+        const lines = [ requiredCols.join(',') ];
+        for (let r = 1; r < aoa.length; r++) {
+          const row = aoa[r];
+          if (row.every(c => c === '' || c == null)) continue;   // skip blank rows
+          const cells = colIndices.map(ci => {
+            const v = ci >= 0 ? String(row[ci] ?? '').trim() : '';
+            return (v.includes(',') || v.includes('"') || v.includes('\n'))
+              ? '"' + v.replace(/"/g, '""') + '"'
+              : v;
+          });
+          lines.push(cells.join(','));
+        }
+
+        if (pfEl) pfEl.style.width = '95%';
+        const csvBlob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        resolve(csvBlob);
+
+      } catch (err) { reject(err); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHUNKED UPLOAD — sends trimmed blob in ≤20 MB pieces
+// ─────────────────────────────────────────────────────────────────────────────
+const CHUNK_BYTES = 20 * 1024 * 1024;
+let _activePollInterval = null;
+
+async function doUpload(key) {
+  const stored = _trimmedBlobs[key];
+  if (!stored) { alert('Please select a file first.'); return; }
+
+  const { blob, name } = stored;
+  const btn = document.getElementById('btn-' + key);
+  const pw  = document.getElementById('pw-' + key);
+  const pf  = document.getElementById('pf-' + key);
+  const pt  = document.getElementById('pt-' + key);
+
+  btn.disabled = true;
+  pw.style.display = 'block';
+  pf.style.width   = '1%';
+  pt.textContent   = 'Preparing upload…';
+  hideResult(key);
+  if (_activePollInterval) { clearInterval(_activePollInterval); _activePollInterval = null; }
+
+  const totalChunks = Math.ceil(blob.size / CHUNK_BYTES);
+  const uploadId    = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const fileSizeMB  = (blob.size / 1024 / 1024).toFixed(1);
+
+  // Start an active log entry for this upload
+  const uploadLabel = TAG_LABEL[key] || key.toUpperCase();
+  const logId = addLog(key, `${uploadLabel} upload started — sending ${fileSizeMB} MB`, 'active', 0, 'Uploading chunks…');
+
+  try {
+    // Phase 1 — upload chunks (0 → 50 %)
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_BYTES;
+      const end   = Math.min(start + CHUNK_BYTES, blob.size);
+      const fd    = new FormData();
+      fd.append('upload_id',   uploadId);
+      fd.append('chunk_index', i);
+      fd.append('file',        blob.slice(start, end), name);
+
+      const res = await fetch('/api/upload/chunk', { method: 'POST', body: fd, credentials: 'include' });
+      if (!res.ok) {
+        let e = `HTTP ${res.status}`;
+        try { const d = await res.json(); e = d.error || e; } catch(_) {}
+        throw new Error(`Chunk ${i+1} failed: ${e}`);
+      }
+      const d = await res.json();
+      if (!d.success) throw new Error(d.error || `Chunk ${i+1} rejected`);
+
+      const chunkPct = Math.round(((i+1)/totalChunks)*50);
+      pf.style.width  = chunkPct + '%';
+      pt.textContent  = `Uploading… ${(end/1024/1024).toFixed(0)} MB of ${fileSizeMB} MB (part ${i+1}/${totalChunks})`;
+      updateActiveLog(logId, chunkPct, `Sending part ${i+1} of ${totalChunks}`,
+        `${uploadLabel} upload — ${(end/1024/1024).toFixed(0)}/${fileSizeMB} MB`);
+    }
+
+    // Phase 2 — assemble
+    pt.textContent = 'All chunks sent — assembling on server…';
+    pf.style.width = '50%';
+    updateActiveLog(logId, 50, 'Assembling file on server…', `${uploadLabel} — assembling`);
+
+    const asmRes = await fetch('/api/upload/chunk/assemble', {
+      credentials: 'include',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upload_id: uploadId, total_chunks: totalChunks, filename: name, key }),
+    });
+    if (!asmRes.ok) {
+      let e = `HTTP ${asmRes.status}`;
+      try { const d = await asmRes.json(); e = d.error || e; } catch(_) {}
+      throw new Error(`Assembly failed: ${e}`);
+    }
+    const asmData = await asmRes.json();
+    if (!asmData.success) throw new Error(asmData.error || 'Assembly rejected');
+
+    // Phase 3 — poll rebuild (50 → 100 %)
+    pt.textContent = 'File assembled — rebuilding dashboard…';
+    showResult(key, '⏳ Processing… dashboard will update once rebuild completes.', 'info');
+
+    _activePollInterval = setInterval(async () => {
+      try {
+        const st = await (await fetch('/api/rebuild/status', {credentials:'include'})).json();
+        // Map server pct (0-100) into our 50-100 range
+        const barPct = 50 + Math.round((st.pct||0)*0.5);
+        pf.style.width = barPct + '%';
+        pt.textContent = st.step || 'Rebuilding…';
+        updateActiveLog(logId, barPct, st.step || 'Rebuilding…',
+          `${uploadLabel} — ${st.step || 'Rebuilding…'}`);
+
+        if (st.error) {
+          clearInterval(_activePollInterval); _activePollInterval = null;
+          showResult(key, '❌ Rebuild error: ' + st.error, 'error');
+          completeActiveLog(logId, `❌ ${uploadLabel} failed: ${st.error}`, 'error');
+          pw.style.display = 'none'; btn.disabled = false;
+        } else if (!st.running) {
+          clearInterval(_activePollInterval); _activePollInterval = null;
+          pf.style.width = '100%';
+          // Pick the right count for each upload type:
+          //   user_master  → last_row_count (users upserted)
+          //   community    → last_row_count (community records saved)
+          //   batch_plan   → last_row_count (batch plan rows saved)
+          //   ecp/att/fa   → candidates     (ECP in-memory candidate count)
+          let doneMsg;
+          if (key === 'user_master') {
+            doneMsg = `✅ ${uploadLabel} done — ${(st.last_row_count||0).toLocaleString()} users upserted`;
+          } else if (key === 'community') {
+            doneMsg = `✅ ${uploadLabel} done — ${(st.last_row_count||0).toLocaleString()} community records loaded`;
+          } else if (key === 'batch_plan') {
+            doneMsg = `✅ ${uploadLabel} done — ${(st.last_row_count||0).toLocaleString()} batch plan rows loaded`;
+          } else {
+            doneMsg = `✅ ${uploadLabel} done — ${(st.candidates||0).toLocaleString()} candidates loaded`;
+          }
+          showResult(key, doneMsg, 'success');
+          completeActiveLog(logId, doneMsg, 'success');
+          await loadStats();
+          setTimeout(() => { pw.style.display='none'; pf.style.width='0%'; }, 2000);
+          btn.disabled = false;
+        }
+      } catch(_) { pt.textContent = 'Rebuilding… (reconnecting)'; }
+    }, 2000);
+
+  } catch (err) {
+    if (_activePollInterval) { clearInterval(_activePollInterval); _activePollInterval = null; }
+    showResult(key, '❌ Upload error: ' + err.message, 'error');
+    completeActiveLog(logId, `❌ ${uploadLabel} error: ${err.message}`, 'error');
+    pw.style.display = 'none'; btn.disabled = false;
+  }
+}
+
+function showResult(key, html, type) {
+  const rb = document.getElementById('rb-' + key);
+  rb.innerHTML = html; rb.className = 'result-box ' + type; rb.style.display = 'block';
+}
+function hideResult(key) { document.getElementById('rb-' + key).style.display = 'none'; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// User Management — tabbed design
+// ─────────────────────────────────────────────────────────────────────────────
+let _umScopeOptions = { centres: [], projects: [], centre_map: [] };
+let _umAllUsers = [];
+let _umEditingEmail = null;
+
+function switchUmTab(tab) {
+  document.getElementById('tab-upload').classList.toggle('active', tab === 'upload');
+  document.getElementById('tab-users').classList.toggle('active', tab === 'users');
+  document.getElementById('um-panel-upload').style.display = tab === 'upload' ? '' : 'none';
+  document.getElementById('um-panel-users').style.display  = tab === 'users'  ? '' : 'none';
+  if (tab === 'users') { loadScopeOptions(); loadUsers(); loadSessionStats(); }
+}
+
+async function loadScopeOptions() {
+  try {
+    const r = await fetch('/api/users/scope_options', {credentials:'include'});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.success) { _umScopeOptions = d; umRenderCentreList(''); umRenderProjectList(''); }
+  } catch(e) {}
+}
+
+async function loadUsers() {
+  try {
+    const r = await fetch('/api/users/list', {credentials:'include'});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.success) {
+      _umAllUsers = d.users;
+      umRenderUsers(_umAllUsers);
+      const cnt = d.users.length;
+      document.getElementById('um-user-count').textContent  = cnt;
+      document.getElementById('um-user-count2').textContent = cnt;
+    }
+  } catch(e) {}
+}
+
+function umRenderCentreList(filter) {
+  const list = document.getElementById('um-centre-list');
+  if (!list) return;
+  const centres = _umScopeOptions.centre_map || [];
+  const f = filter.toLowerCase();
+  const filtered = f ? centres.filter(c => (c.name||c.id).toLowerCase().includes(f) || c.id.toLowerCase().includes(f)) : centres;
+  if (!filtered.length) { list.innerHTML = '<div style="color:var(--muted);font-size:.72rem;padding:.5rem">No centres found</div>'; return; }
+  list.innerHTML = filtered.map(c =>
+    `<label class="um-centre-item">
+      <input type="checkbox" class="um-centre-cb" value="${c.id}"/>
+      <span class="um-centre-name">${c.name||c.id}</span>
+      <span class="um-centre-id">${c.id}</span>
+    </label>`).join('');
+}
+
+function umRenderProjectList(filter) {
+  const list = document.getElementById('um-project-list');
+  if (!list) return;
+  const projects = _umScopeOptions.projects || [];
+  const f = filter.toLowerCase();
+  const filtered = f ? projects.filter(p => p.toLowerCase().includes(f)) : projects;
+  if (!filtered.length) { list.innerHTML = '<div style="color:var(--muted);font-size:.72rem;padding:.5rem">No projects found</div>'; return; }
+  list.innerHTML = filtered.map(p =>
+    `<label class="um-centre-item">
+      <input type="checkbox" class="um-project-cb" value="${p.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"/>
+      <span class="um-centre-name">${p}</span>
+    </label>`).join('');
+}
+
+function umFilterCentres() { umRenderCentreList(document.getElementById('um-centre-filter').value); }
+function umFilterProjects() { umRenderProjectList(document.getElementById('um-project-filter').value); }
+
+function umRenderUsers(users) {
+  const el = document.getElementById('um-users-list');
+  if (!el) return;
+  if (!users.length) { el.innerHTML = '<div style="color:var(--muted);font-size:.75rem;padding:1rem;text-align:center">No users found</div>'; return; }
+  const roleClass = {CMP:'role-cmp',IT:'role-it','Project Manager':'role-pm','Centre Manager':'role-cm'};
+  const roleLabel = {CMP:'CMP',IT:'IT','Project Manager':'Project Manager','Centre Manager':'Centre Manager'};
+  el.innerHTML = users.map(u => {
+    const initials = (u.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const scope = u.role==='Centre Manager' ? `${(u.mapped_centres||[]).length} centre(s)` :
+                  u.role==='Project Manager' ? `${(u.mapped_projects||[]).length} project(s)` : 'Full access';
+    const isActive = u.active !== 'No';
+    const avColor = u.role==='IT'?'#7c3aed':u.role==='CMP'?'#b45309':u.role==='Project Manager'?'#1d4ed8':'#065f46';
+    return `<div class="um-user-row" style="${!isActive?'opacity:.5':''}">
+      <div class="um-user-av" style="background:${avColor}">${initials}</div>
+      <div class="um-user-info">
+        <div class="um-user-name">${u.name}</div>
+        <div class="um-user-email">${u.email}</div>
+        <div class="um-user-ecode">Ecode: ${u.ecode}</div>
+      </div>
+      <span class="um-role-badge ${roleClass[u.role]||'role-cm'}">${roleLabel[u.role]||u.role}</span>
+      <span class="um-scope-txt">${scope}</span>
+      <div class="um-user-actions">
+        <button class="btn-edit" onclick="umEditUser(${JSON.stringify(u.email)})">Edit</button>
+        ${isActive
+          ? `<button class="btn-disable" onclick="umDisableUser(${JSON.stringify(u.email)},${JSON.stringify(u.name)})">Disable</button>`
+          : `<button class="btn-enable" onclick="umEnableUser(${JSON.stringify(u.email)})">Enable</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function umFilterUsers() {
+  const q = (document.getElementById('um-search').value||'').toLowerCase();
+  umRenderUsers(q ? _umAllUsers.filter(u => u.name.toLowerCase().includes(q)||u.email.toLowerCase().includes(q)||u.role.toLowerCase().includes(q)) : _umAllUsers);
+}
+
+function onRoleChange() {
+  const role = document.getElementById('um-role').value;
+  const cf = document.getElementById('um-centres-field');
+  const pf = document.getElementById('um-projects-field');
+  const ai = document.getElementById('um-fullaccess-info');
+  if (cf) cf.style.display  = role === 'Centre Manager'  ? '' : 'none';
+  if (pf) pf.style.display  = role === 'Project Manager' ? '' : 'none';
+  if (ai) ai.style.display  = ['CMP','IT'].includes(role) ? '' : 'none';
+}
+
+function umEditUser(email) {
+  const u = _umAllUsers.find(x => x.email === email);
+  if (!u) return;
+  _umEditingEmail = email;   // store the ORIGINAL email before any edit
+  document.getElementById('um-form-title').textContent = 'Edit User';
+  document.getElementById('um-name').value  = u.name;
+  document.getElementById('um-email').value = u.email;
+  document.getElementById('um-ecode').value = u.ecode;
+  document.getElementById('um-role').value  = u.role;
+  document.getElementById('um-active').checked = u.active !== 'No';
+  onRoleChange();
+  setTimeout(() => {
+    // FIX: compare against mapped_centre_ids (not mapped_centres which are display names)
+    document.querySelectorAll('.um-centre-cb').forEach(cb => {
+      cb.checked = (u.mapped_centre_ids || []).includes(cb.value);
+    });
+    document.querySelectorAll('.um-project-cb').forEach(pb => {
+      pb.checked = (u.mapped_projects || []).includes(pb.value);
+    });
+  }, 200);
+  document.getElementById('um-form-panel') && document.getElementById('um-form-panel').scrollIntoView({behavior:'smooth'});
+}
+
+function umClearForm() {
+  _umEditingEmail = null;
+  document.getElementById('um-form-title').textContent = 'Create New User';
+  ['um-name','um-email','um-ecode'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  const roleEl = document.getElementById('um-role'); if(roleEl) roleEl.value='Centre Manager';
+  const activeEl = document.getElementById('um-active'); if(activeEl) activeEl.checked=true;
+  document.querySelectorAll('.um-centre-cb').forEach(cb => cb.checked=false);
+  document.querySelectorAll('.um-project-cb').forEach(pb => pb.checked=false);
+  const res = document.getElementById('um-result'); if(res) res.style.display='none';
+  onRoleChange();
+}
+
+async function doCreateUser() {
+  const btn    = document.getElementById('btn-create-user');
+  const result = document.getElementById('um-result');
+  const ecode  = (document.getElementById('um-ecode').value||'').trim();
+  const name   = (document.getElementById('um-name').value||'').trim();
+  const email  = (document.getElementById('um-email').value||'').trim();
+  const role   = document.getElementById('um-role').value;
+  const active = document.getElementById('um-active').checked ? 'Yes' : 'No';
+  result.style.display = 'none';
+  if (!ecode||!name||!email||!role) {
+    result.className='um-result error'; result.textContent='Name, Email, Ecode and Role are required.'; result.style.display='block'; return;
+  }
+  const mapped_centre_ids = Array.from(document.querySelectorAll('.um-centre-cb:checked')).map(cb=>cb.value);
+  const mapped_projects   = Array.from(document.querySelectorAll('.um-project-cb:checked')).map(pb=>pb.value);
+  btn.disabled=true; btn.textContent='Saving...';
+  try {
+    const payload = {ecode,name,email,role,active,mapped_centre_ids,mapped_projects};
+    // FIX: send original_email so the backend UPDATE targets the correct row
+    // even when the email address itself has been changed
+    if (_umEditingEmail) payload.original_email = _umEditingEmail;
+    const r = await fetch('/api/users/save', {
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()},
+      body:JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (d.success) {
+      result.className='um-result success';
+      result.textContent=(d.action==='updated'?'✅ Updated: ':'✅ Created: ')+email;
+      result.style.display='block';
+      umClearForm(); await loadUsers();
+    } else {
+      result.className='um-result error'; result.textContent='Error: '+(d.error||'Unknown'); result.style.display='block';
+    }
+  } catch(e) { result.className='um-result error'; result.textContent='Network error: '+e.message; result.style.display='block'; }
+  btn.disabled=false; btn.textContent='Save User';
+}
+
+async function umDisableUser(email, name) {
+  if (!confirm('Disable ' + name + '? They will not be able to log in.')) return;
+  // Use /api/users/delete — a direct UPDATE active='No' with no field validation.
+  // Previously called /api/users/save which required name/ecode/role to be
+  // non-empty and silently failed if any were missing, leaving the user active.
+  try {
+    const r = await fetch('/api/users/delete', {
+      method: 'POST', credentials: 'include',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken()},
+      body: JSON.stringify({ email }),
+    });
+    const d = await r.json();
+    if (d.success) {
+      await loadUsers();
+    } else {
+      alert('Could not disable user: ' + (d.error || 'Unknown error'));
+    }
+  } catch(e) {
+    alert('Network error while disabling user. Please try again.');
+  }
+}
+
+async function umEnableUser(email) {
+  // Use /api/users/enable — a direct UPDATE active='Yes' with no field validation.
+  // Previously called /api/users/save which could silently fail validation.
+  try {
+    const r = await fetch('/api/users/enable', {
+      method: 'POST', credentials: 'include',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken()},
+      body: JSON.stringify({ email }),
+    });
+    const d = await r.json();
+    if (d.success) {
+      await loadUsers();
+    } else {
+      alert('Could not enable user: ' + (d.error || 'Unknown error'));
+    }
+  } catch(e) {
+    alert('Network error while enabling user. Please try again.');
+  }
+}
+
+/* ── Session Stats (IT role only) ─────────────────────────────── */
+async function loadSessionStats() {
+  const el = document.getElementById('session-stats-body');
+  const countEl = document.getElementById('session-active-count');
+  if (!el) return;
+  el.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1.5rem">Loading…</td></tr>';
+  try {
+    const r = await fetch('/api/users/session_stats', {credentials:'include'});
+    const d = await r.json();
+    if (!d.success) { el.innerHTML = `<tr><td colspan="6" style="color:red">${d.error}</td></tr>`; return; }
+    if (countEl) countEl.textContent = d.active_count + ' online now';
+    if (!d.sessions.length) { el.innerHTML = '<tr><td colspan="6" style="color:var(--muted);text-align:center">No login records yet</td></tr>'; return; }
+    el.innerHTML = d.sessions.map(s => `
+      <tr style="${s.online_now ? 'background:rgba(34,197,94,.08)' : ''}">
+        <td>
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${s.online_now?'#22c55e':'#6b7280'};margin-right:6px"></span>
+          ${s.name || '—'}
+        </td>
+        <td style="color:var(--muted);font-size:.8rem">${s.email}</td>
+        <td><span class="um-role-badge ${s.role==='IT'?'role-it':s.role==='Project Manager'?'role-pm':'role-cm'}">${s.role}</span></td>
+        <td style="font-size:.8rem">${s.login_at}</td>
+        <td style="font-size:.8rem">${s.last_seen}</td>
+        <td style="font-size:.8rem;color:var(--muted)">${s.ip}</td>
+      </tr>`).join('');
+  } catch(e) { el.innerHTML = `<tr><td colspan="6" style="color:red">Failed to load: ${e.message}</td></tr>`; }
+}
+
+function getCsrfToken() {
+  const m = document.cookie.match(/csrftoken=([^;]+)/);
+  return m ? m[1] : '';
+}
+
+// Activity log
+// ─────────────────────────────────────────────────────────────────────────────
+const TAG_CLASS = {att:'tag-att',fa:'tag-fa',ecp:'tag-ecp',community:'tag-comm',batch_plan:'tag-fa',user_master:'tag-bp',error:'tag-err'};
+const TAG_LABEL = {att:'ATT',fa:'FA',ecp:'ECP',community:'COMM',batch_plan:'BP',user_master:'USERS',error:'ERR'};
+const LOGS = [];
+// ── Rich Activity Log ────────────────────────────────────────────────────────
+// Each log entry has: time, key, msg, type ('active'|'success'|'error'), pct, step
+// The active entry (type=active) shows a live mini-progress bar.
+let _activeLogId = null;
+
+function addLog(key, msg, type='success', pct=null, step=null) {
+  const id   = Date.now() + Math.random();
+  const time = new Date().toTimeString().slice(0,8);
+  const entry = { id, time, key: type==='error' ? 'error' : key, msg, type, pct, step };
+  if (type === 'active') _activeLogId = id;
+  LOGS.unshift(entry);
+  renderLog();
+  return id;
+}
+
+function updateActiveLog(id, pct, step, msg) {
+  const entry = LOGS.find(l => l.id === id);
+  if (!entry) return;
+  if (pct  !== undefined) entry.pct  = pct;
+  if (step !== undefined) entry.step = step;
+  if (msg  !== undefined) entry.msg  = msg;
+  renderLog();
+}
+
+function completeActiveLog(id, msg, type='success') {
+  const entry = LOGS.find(l => l.id === id);
+  if (!entry) return;
+  entry.type = type;
+  entry.pct  = type === 'success' ? 100 : entry.pct;
+  entry.step = type === 'success' ? 'Complete' : 'Failed';
+  if (msg) entry.msg = msg;
+  if (_activeLogId === id) _activeLogId = null;
+  renderLog();
+}
+
+function renderLog() {
+  const list = document.getElementById('log-list');
+  list.innerHTML = LOGS.slice(0, 30).map(l => {
+    const colorClass = l.type === 'active' ? 'blue' : l.type === 'success' ? 'green' : 'red';
+    const showBar    = l.pct !== null && l.pct !== undefined;
+    const pctTxt     = showBar ? ` ${Math.round(l.pct)}%` : '';
+    return `<li class="log-item ${l.type}">
+      <div class="log-row1">
+        <span class="log-time">${l.time}</span>
+        <span class="log-msg">${l.msg}${l.type==='active' ? pctTxt : ''}</span>
+        <span class="log-tag ${TAG_CLASS[l.key]||'tag-att'}">${TAG_LABEL[l.key]||l.key.toUpperCase()}</span>
+      </div>
+      ${showBar ? `<div class="log-prog-wrap" style="display:block">
+        <div class="log-prog-fill ${colorClass}" style="width:${Math.round(l.pct)}%"></div>
+      </div>` : ''}
+      ${l.step ? `<div class="log-step" style="display:block">${l.step}</div>` : ''}
+    </li>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stats
+// ─────────────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const d = await (await fetch('/api/upload/stats')).json();
+    document.getElementById('st-cand').textContent  = d.candidates.toLocaleString();
+    document.getElementById('st-att').textContent   = d.att_rows.toLocaleString();
+    document.getElementById('st-fa').textContent    = d.fa_rows.toLocaleString();
+    document.getElementById('st-comm').textContent  = d.comm_rows.toLocaleString();
+    const cEl = document.getElementById('st-compl');
+    if(cEl) cEl.textContent = (d.compl_rows || 0).toLocaleString();
+    document.getElementById('ver-badge').textContent      = 'v' + d.version;
+    document.getElementById('last-reload-txt').textContent = 'Last reload: ' + d.last_reload;
+  } catch(e) {}
+}
+loadStats();
+setInterval(loadStats, 30000);
+</script>
+</body>
+</html>

@@ -1,85 +1,115 @@
-{# ════════════════════════════════════════════════════════════════════════════
-   TRAINER & MOBILIZER STATUS — TARGET-BASED (Trainer_Target / Mobilsier_Target)
-   - Trainer Status: row per Trainer in Manpower; day-wise hours (auto-month).
-     Trainer not in Trainer_Target → Idle (Target not assigned).
-   - Mobilizer Status: row per Mobilizer in Manpower; E Target / E Act / %.
-     Mobilizer not in Mobilsier_Target → Idle (Target not assigned).
-   ════════════════════════════════════════════════════════════════════════════ #}
+{% comment %}
+════════════════════════════════════════════════════════════════════════════
+ATTENDANCE / DURATION / MOBILIZER STATUS
+
+• Attendance Performance: row per (Batch × Trainer) from
+  Trainer_productivity_present. Shows Enrolled, day-wise Present, Present %.
+• Trainer Productivity Duration: row per (Batch × Trainer) from
+  Trainer_productivity_duration. Day-wise hours, total, days worked.
+• Mobilizer Status (unchanged): row per Mobilizer in Manpower with target
+  vs actual; unmatched mobilizers → "Idle (Target not assigned)".
+
+Trainer_Target is no longer used. Day columns are derived dynamically from
+the productivity sheets (currently May 2026).
+════════════════════════════════════════════════════════════════════════════
+{% endcomment %}
 
 <style>
 .ss-block { margin-bottom: 22px; }
 .ss-summary { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
 .ss-chip { padding:4px 14px; border-radius:20px; font-size:13px; font-weight:600; }
 .ss-chip.active { background:rgba(34,197,94,.13);  color:#065f46; border:1px solid rgba(34,197,94,.3); }
+.ss-chip.info   { background:rgba(59,130,246,.13); color:#1e3a8a; border:1px solid rgba(59,130,246,.3); }
 .ss-chip.idle   { background:rgba(245,158,11,.15); color:#92400e; border:1px solid rgba(245,158,11,.4); }
 
 .ss-badge { display:inline-block; padding:2px 10px; border-radius:12px; font-size:11px; font-weight:700; white-space:nowrap; }
 .ss-badge.occupied { background:rgba(34,197,94,.18);  color:#065f46; }
 .ss-badge.idle     { background:rgba(245,158,11,.22); color:#92400e; }
 
-.trainer-tbl,
+.prod-tbl,
 .mobilizer-tbl { width:100%; border-collapse:collapse; font-size:13px; }
-.trainer-tbl th, .trainer-tbl td,
+.prod-tbl th, .prod-tbl td,
 .mobilizer-tbl th, .mobilizer-tbl td { padding:8px 10px; border-bottom:1px solid var(--border); }
-.trainer-tbl thead th, .mobilizer-tbl thead th { background:#f8fafc; color:var(--primary); font-weight:700; text-align:left; position:sticky; top:0; z-index:1; }
-.trainer-tbl td.num, .mobilizer-tbl td.num,
-.trainer-tbl th.num, .mobilizer-tbl th.num { text-align:right; font-variant-numeric:tabular-nums; }
-.trainer-tbl tbody tr:hover, .mobilizer-tbl tbody tr:hover { background:#f9fafb; }
-.trainer-tbl tr.row-idle, .mobilizer-tbl tr.row-idle { background:#fffbeb; }
+.prod-tbl thead th, .mobilizer-tbl thead th { background:#f8fafc; color:var(--primary); font-weight:700; text-align:left; position:sticky; top:0; z-index:1; }
+.prod-tbl td.num, .mobilizer-tbl td.num,
+.prod-tbl th.num, .mobilizer-tbl th.num { text-align:right; font-variant-numeric:tabular-nums; }
+.prod-tbl tbody tr:hover, .mobilizer-tbl tbody tr:hover { background:#f9fafb; }
+.mobilizer-tbl tr.row-idle { background:#fffbeb; }
+
+.batch-cell  { font-family:monospace; font-size:11.5px; color:#475569; white-space:nowrap; }
+.qp-cell     { font-size:12px; color:#334155; }
+.trainer-cell{ font-weight:600; color:#0f172a; }
 
 .day-h { font-size:11px; text-align:center; min-width:30px; padding:6px 4px !important; }
 .day-c { text-align:center; font-variant-numeric:tabular-nums; padding:6px 4px !important; font-size:12px; }
 .day-c.zero { color:#cbd5e1; }
 .day-c.has  { font-weight:600; color:#0f5132; }
 
-.trainer-wrap { overflow-x:auto; max-height:520px; }
+.pct-pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; }
+.pct-pill.good { background:rgba(34,197,94,.18);  color:#065f46; }
+.pct-pill.warn { background:rgba(245,158,11,.22); color:#92400e; }
+.pct-pill.bad  { background:rgba(239,68,68,.18);  color:#991b1b; }
+.pct-pill.none { background:#e2e8f0;              color:#64748b; }
+
+.prod-wrap     { overflow-x:auto; max-height:520px; }
 .mobilizer-wrap { max-height:520px; overflow-y:auto; }
 </style>
 
-{# ── TRAINER STATUS ──────────────────────────────────────────────────────── #}
+
+{# ── ATTENDANCE PERFORMANCE ──────────────────────────────────────────── #}
 <div class="ss-block card">
   <div class="card-header">
-    <div class="card-title">🎓 Trainer Status</div>
+    <div class="card-title">📋 Attendance Performance</div>
     <div style="font-size:12px;color:var(--muted);">
-      Day-wise hours{% if staff_status.trainer_month %} — {{ staff_status.trainer_month }}{% endif %}
+      Day-wise present count{% if staff_status.attendance_month %} — {{ staff_status.attendance_month }}{% endif %}
     </div>
   </div>
   <div class="card-body" style="padding:16px 20px;">
     <div class="ss-summary">
-      <span class="ss-chip active">Active: {{ staff_status.trainer_active }}</span>
-      <span class="ss-chip idle">Idle (Target not assigned): {{ staff_status.trainer_idle }}</span>
+      <span class="ss-chip active">Batches: {{ staff_status.attendance_batches }}</span>
+      <span class="ss-chip info">Trainers: {{ staff_status.attendance_trainers }}</span>
     </div>
 
-    <div class="trainer-wrap">
-      <table class="trainer-tbl">
+    <div class="prod-wrap">
+      <table class="prod-tbl">
         <thead>
           <tr>
-            <th>Ecode</th>
-            <th>Trainer</th>
+            <th>Batch ID</th>
             <th>Centre</th>
-            <th>Status</th>
-            {% for d in staff_status.trainer_dates %}
+            <th>QP</th>
+            <th>Trainer</th>
+            <th class="num">Enrolled</th>
+            {% for d in staff_status.attendance_dates %}
               <th class="day-h">{{ d }}</th>
             {% endfor %}
-            <th class="num">Total</th>
+            <th class="num">Total Present</th>
             <th class="num">Days</th>
+            <th class="num">Present %</th>
           </tr>
         </thead>
         <tbody>
-          {% for r in staff_status.trainer_rows %}
-          <tr class="{% if not r.in_target %}row-idle{% endif %}">
-            <td>{{ r.eid }}</td>
-            <td>{{ r.name }}</td>
-            <td style="font-size:12px;">{{ r.centre }}</td>
-            <td><span class="ss-badge {{ r.status_class }}">{{ r.status }}</span></td>
-            {% for h in r.day_hours %}
-              <td class="day-c {% if h %}has{% else %}zero{% endif %}">{% if h %}{{ h|floatformat:"-1" }}{% else %}·{% endif %}</td>
+          {% for r in staff_status.attendance_rows %}
+          <tr>
+            <td class="batch-cell">{{ r.batch_id }}</td>
+            <td style="font-size:12px;">{{ r.centre_name }}</td>
+            <td class="qp-cell">{{ r.qp_name }}</td>
+            <td class="trainer-cell">{{ r.trainer_name }}</td>
+            <td class="num">{{ r.enrolled }}</td>
+            {% for v in r.day_present %}
+              <td class="day-c {% if v %}has{% else %}zero{% endif %}">{% if v %}{{ v }}{% else %}·{% endif %}</td>
             {% endfor %}
-            <td class="num">{{ r.total_hours|floatformat:"-1" }}</td>
-            <td class="num">{{ r.days_worked }}</td>
+            <td class="num">{{ r.total_present }}</td>
+            <td class="num">{{ r.days_held }}</td>
+            <td class="num">
+              {% if r.days_held %}
+                <span class="pct-pill {% if r.present_pct >= 80 %}good{% elif r.present_pct >= 60 %}warn{% else %}bad{% endif %}">{{ r.present_pct }}%</span>
+              {% else %}
+                <span class="pct-pill none">—</span>
+              {% endif %}
+            </td>
           </tr>
           {% empty %}
-          <tr><td colspan="100%" style="text-align:center;padding:20px;color:var(--muted);">No trainers in this scope.</td></tr>
+          <tr><td colspan="100%" style="text-align:center;padding:20px;color:var(--muted);">No attendance data for this scope.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -87,7 +117,60 @@
   </div>
 </div>
 
-{# ── MOBILIZER STATUS ────────────────────────────────────────────────────── #}
+
+{# ── TRAINER PRODUCTIVITY DURATION ──────────────────────────────────── #}
+<div class="ss-block card">
+  <div class="card-header">
+    <div class="card-title">⏱️ Trainer Productivity Duration</div>
+    <div style="font-size:12px;color:var(--muted);">
+      Day-wise hours{% if staff_status.duration_month %} — {{ staff_status.duration_month }}{% endif %}
+    </div>
+  </div>
+  <div class="card-body" style="padding:16px 20px;">
+    <div class="ss-summary">
+      <span class="ss-chip active">Batches: {{ staff_status.duration_batches }}</span>
+      <span class="ss-chip info">Trainers: {{ staff_status.duration_trainers }}</span>
+    </div>
+
+    <div class="prod-wrap">
+      <table class="prod-tbl">
+        <thead>
+          <tr>
+            <th>Batch ID</th>
+            <th>Centre</th>
+            <th>QP</th>
+            <th>Trainer</th>
+            {% for d in staff_status.duration_dates %}
+              <th class="day-h">{{ d }}</th>
+            {% endfor %}
+            <th class="num">Total Hrs</th>
+            <th class="num">Days</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in staff_status.duration_rows %}
+          <tr>
+            <td class="batch-cell">{{ r.batch_id }}</td>
+            <td style="font-size:12px;">{{ r.centre_name }}</td>
+            <td class="qp-cell">{{ r.qp_name }}</td>
+            <td class="trainer-cell">{{ r.trainer_name }}</td>
+            {% for h in r.day_hours %}
+              <td class="day-c {% if h %}has{% else %}zero{% endif %}">{% if h %}{{ h|floatformat:"-1" }}{% else %}·{% endif %}</td>
+            {% endfor %}
+            <td class="num">{{ r.total_hours|floatformat:"-1" }}</td>
+            <td class="num">{{ r.days_worked }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="100%" style="text-align:center;padding:20px;color:var(--muted);">No duration data for this scope.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+{# ── MOBILIZER STATUS (unchanged) ───────────────────────────────────── #}
 <div class="ss-block card">
   <div class="card-header">
     <div class="card-title">📣 Mobilizer Status</div>

@@ -10,6 +10,7 @@ class Centre(models.Model):
     sub_cluster_id = models.CharField(max_length=100, null=True, blank=True, db_index=True)
     cluster        = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     sub_cluster    = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    state          = models.CharField(max_length=100, blank=True, db_index=True)  # Centre's physical state (Center Master)
     entity         = models.CharField(max_length=50,  null=True, blank=True)
     # From "Center Status (Active/ Closed/ Going to Close)" column in Center Master.xlsx
     # Common values: "Active", "Opeing Shortly", "Closing Shortly" (note typo in source data)
@@ -28,6 +29,9 @@ class NapsEligible(models.Model):
     minimum_qualification= models.CharField(max_length=255, blank=True)
     on_job_training      = models.CharField(max_length=100, blank=True)
     qp_mapped            = models.CharField(max_length=10,  blank=True)
+    # NAPS / NATS alignment flags (from NAPS Eligible.xlsx)
+    naps_aligned         = models.CharField(max_length=10,  blank=True)
+    nats_aligned         = models.CharField(max_length=10,  blank=True)
 
     def __str__(self):
         return self.qp
@@ -63,11 +67,16 @@ class BatchPlan(models.Model):
     final_certification_planned = models.IntegerField(default=0)
     final_placement_planned     = models.IntegerField(default=0)
 
+    # Entity (SF / LLF)
+    entity          = models.CharField(max_length=20, blank=True, default='')
+
     # Actuals (Q1A: trust these columns as the source of truth)
     on_going        = models.IntegerField(default=0)   # On Going flag/count
     fy_e_act        = models.IntegerField(default=0)   # FY 26-27 E Act
     fy_c_act        = models.IntegerField(default=0)   # FY 26-27 C Act
     fy_p_act        = models.IntegerField(default=0)   # FY 26-27 P Act
+    fy_naps_act     = models.IntegerField(default=0)   # FY 26-27 NAPS Act
+    fy_nats_act     = models.IntegerField(default=0)   # FY 26-27 NATS Act
 
     def __str__(self):
         return self.batch_id
@@ -205,6 +214,7 @@ class SAHIDemand(models.Model):
     cluster             = models.CharField(max_length=255, blank=True, db_index=True)
     sub_cluster         = models.CharField(max_length=255, blank=True, db_index=True)
     region              = models.CharField(max_length=255, blank=True, db_index=True)
+    zone                = models.CharField(max_length=100, blank=True, db_index=True)  # Production / Technology & Services
     existing_potential  = models.CharField(max_length=50,  blank=True)
     demand_city         = models.CharField(max_length=255, blank=True, db_index=True)
     location            = models.CharField(max_length=255, blank=True)
@@ -216,6 +226,24 @@ class SAHIDemand(models.Model):
 
     def __str__(self):
         return f"{self.existing_client} — {self.designation} ({self.demand_city})"
+
+
+class DesignationQPMap(models.Model):
+    """
+    Maps SAHI Demand designations → Qualification Packs (QPs) in BatchPlan.
+    Source: Designation_Master.xlsx (2 cols: Designation | Qp).
+    One designation can map to multiple QPs (one row per mapping).
+    """
+    designation = models.CharField(max_length=255, db_index=True)
+    qp          = models.CharField(max_length=255, db_index=True)
+
+    class Meta:
+        unique_together = [('designation', 'qp')]
+        verbose_name     = 'Designation → QP Mapping'
+        verbose_name_plural = 'Designation → QP Mappings'
+
+    def __str__(self):
+        return f"{self.designation} → {self.qp}"
 
 
 class ClusterMaster(models.Model):
@@ -438,3 +466,248 @@ class OutreachStatus(models.Model):
 
     def __str__(self):
         return f"{self.discovered_employer_id} — {self.status}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Sourcing Summary
+#  ----------------
+#  Master:  Sourcing_Channels_Master.xlsx — full taxonomy of 6 Community Sources
+#           with 46 Community Categories (e.g. Community Mobilisation → Panchayat).
+#  Actual:  Sourcing_Actual_Data.xlsx — one row per candidate showing which
+#           Source / Category they were sourced through. Counts here drive the
+#           "candidate count" and the Active flag on the Sourcing Summary card.
+# ─────────────────────────────────────────────────────────────────────────────
+class SourcingChannelMaster(models.Model):
+    """Master taxonomy: Community Source → Community Category.
+    Defines the full universe of categories that *can* exist for each source,
+    regardless of whether any candidate has actually been sourced through it."""
+    community_source   = models.CharField(max_length=255, db_index=True)
+    community_category = models.CharField(max_length=255, db_index=True)
+
+    class Meta:
+        unique_together = [('community_source', 'community_category')]
+        indexes = [models.Index(fields=['community_source', 'community_category'])]
+
+    def __str__(self):
+        return f"{self.community_source} → {self.community_category}"
+
+
+class SourcingActual(models.Model):
+    """One row per candidate showing the Source / Category they came in through.
+    Each row counts as 1 lead/candidate for the Sourcing Summary card."""
+    centre             = models.ForeignKey(Centre, on_delete=models.SET_NULL,
+                                           null=True, blank=True, to_field='centre_id')
+    centre_id_raw      = models.CharField(max_length=100, blank=True, db_index=True)
+    centre_name        = models.CharField(max_length=255, blank=True)
+    batch_id           = models.CharField(max_length=100, blank=True, db_index=True)
+    candidate_age      = models.IntegerField(null=True, blank=True)
+    community_source   = models.CharField(max_length=255, blank=True, db_index=True)
+    community_category = models.CharField(max_length=255, blank=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['community_source', 'community_category']),
+            models.Index(fields=['centre_id_raw', 'community_source']),
+        ]
+
+    def __str__(self):
+        return f"{self.centre_name} · {self.community_source} / {self.community_category}"
+
+
+# ── Trainer Productivity (NEW — replaces Trainer_Target) ────────────────────
+#
+# Two paired tables driven by Trainer_productivity_present.xlsx and
+# Trainer_productivity_duration.xlsx. Each row is one Batch × Trainer; the
+# day-wise figures (present-count or hours) are stored in the *Day child rows.
+#
+# Replaces the old TrainerTarget-based "Trainer Status" view with:
+#   • Attendance Performance — Enrolled, day-wise Present, Present %
+#   • Trainer Productivity Duration — day-wise hours, total, days worked
+
+class TrainerProductivityPresent(models.Model):
+    """One row per (Batch × Trainer) from Trainer_productivity_present.xlsx."""
+    batch_id     = models.CharField(max_length=100, blank=True, db_index=True)
+    centre_name  = models.CharField(max_length=255, blank=True)
+    centre_id    = models.CharField(max_length=100, blank=True, db_index=True)
+    qp_name      = models.CharField(max_length=255, blank=True)
+    trainer_name = models.CharField(max_length=255, blank=True)
+    trainer_id   = models.IntegerField(db_index=True)
+    enrolled     = models.IntegerField(default=0)
+
+    class Meta:
+        indexes = [models.Index(fields=['centre_id', 'trainer_id'])]
+
+    def __str__(self):
+        return f"{self.trainer_name} · {self.batch_id} ({self.enrolled} enr)"
+
+
+class TrainerProductivityPresentDay(models.Model):
+    """Per-day present count for one TrainerProductivityPresent row."""
+    parent = models.ForeignKey(
+        TrainerProductivityPresent, related_name='days', on_delete=models.CASCADE
+    )
+    date     = models.DateField(db_index=True)
+    present  = models.IntegerField(default=0)
+
+    class Meta:
+        indexes  = [models.Index(fields=['parent', 'date'])]
+        ordering = ['date']
+
+
+class TrainerProductivityDuration(models.Model):
+    """One row per (Batch × Trainer) from Trainer_productivity_duration.xlsx."""
+    batch_id     = models.CharField(max_length=100, blank=True, db_index=True)
+    centre_name  = models.CharField(max_length=255, blank=True)
+    centre_id    = models.CharField(max_length=100, blank=True, db_index=True)
+    qp_name      = models.CharField(max_length=255, blank=True)
+    trainer_name = models.CharField(max_length=255, blank=True)
+    trainer_id   = models.IntegerField(db_index=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['centre_id', 'trainer_id'])]
+
+    def __str__(self):
+        return f"{self.trainer_name} · {self.batch_id}"
+
+
+class TrainerProductivityDurationDay(models.Model):
+    """Per-day duration (decimal hours) for one TrainerProductivityDuration row."""
+    parent = models.ForeignKey(
+        TrainerProductivityDuration, related_name='days', on_delete=models.CASCADE
+    )
+    date  = models.DateField(db_index=True)
+    hours = models.FloatField(default=0)
+
+    class Meta:
+        indexes  = [models.Index(fields=['parent', 'date'])]
+        ordering = ['date']
+
+
+# ── Associate Supply (NEW — for SAHI "Supply Chain" tables) ─────────────────
+
+class AssociateData(models.Model):
+    """
+    One row per candidate associate. Source: Associate_data.xlsx.
+    Bridges SAHI demand → ITI/Polytechnic supply via Sub Cluster ID + Supply PIN.
+    """
+    associate_no                = models.CharField(max_length=50,  blank=True, db_index=True)
+    associate_name              = models.CharField(max_length=255, blank=True)
+    date_of_birth               = models.CharField(max_length=20,  blank=True)
+    gender                      = models.CharField(max_length=20,  blank=True, db_index=True)
+    permanent_address           = models.TextField(blank=True)
+    supply_state                = models.CharField(max_length=100, blank=True, db_index=True)
+    supply_district             = models.CharField(max_length=100, blank=True, db_index=True)
+    supply_pin                  = models.CharField(max_length=10,  blank=True, db_index=True)
+    latitude                    = models.FloatField(null=True, blank=True)
+    longitude                   = models.FloatField(null=True, blank=True)
+    demand_city                 = models.CharField(max_length=100, blank=True)
+    demand_cluster_client_loc   = models.CharField(max_length=255, blank=True)
+    client                      = models.CharField(max_length=500, blank=True, db_index=True)
+    sub_cluster_id              = models.CharField(max_length=100, blank=True, db_index=True)
+    cluster                     = models.CharField(max_length=255, blank=True, db_index=True)
+    sub_cluster                 = models.CharField(max_length=255, blank=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['sub_cluster_id', 'supply_pin']),
+            models.Index(fields=['cluster', 'sub_cluster']),
+        ]
+
+    def __str__(self):
+        return f"{self.associate_no} · {self.associate_name}"
+
+
+class ITIPolytechnicByPIN(models.Model):
+    """
+    Reference list of ITI / Polytechnic colleges grouped by Supply PIN.
+    Source: ITI_Polytechnic_Colleges_by_PIN_Supply.xlsx.
+    """
+    sno              = models.IntegerField(null=True, blank=True)
+    supply_pin       = models.CharField(max_length=10, blank=True, db_index=True)
+    latitude         = models.FloatField(null=True, blank=True)
+    longitude        = models.FloatField(null=True, blank=True)
+    institution_name = models.CharField(max_length=500, blank=True)
+    institution_type = models.CharField(max_length=50,  blank=True, db_index=True)  # 'ITI' / 'Polytechnic'
+    address_location = models.CharField(max_length=500, blank=True)
+    distance_km      = models.CharField(max_length=50,  blank=True)
+
+    class Meta:
+        indexes  = [models.Index(fields=['supply_pin', 'institution_type'])]
+        ordering = ['supply_pin', 'institution_type', 'institution_name']
+
+    def __str__(self):
+        return f"{self.institution_name} ({self.institution_type}) @ {self.supply_pin}"
+
+
+class WorkSetuPINMap(models.Model):
+    """
+    Maps Supply PIN → WorkSetu Sub Cluster.
+    Source: Supply_WorkSetu_Sub_Cluster.xlsx
+    Columns: Supply State | Supply District | Supply PIN | Sub Cluster
+    Used to derive the WorkSetu Sub Cluster for every associate (via supply_pin).
+    """
+    supply_state        = models.CharField(max_length=100, blank=True, db_index=True)
+    supply_district     = models.CharField(max_length=100, blank=True, db_index=True)
+    supply_pin          = models.CharField(max_length=10,  unique=True, db_index=True)
+    worksetu_sub_cluster = models.CharField(max_length=255, blank=True, db_index=True)
+
+    class Meta:
+        verbose_name        = 'WorkSetu PIN Mapping'
+        verbose_name_plural = 'WorkSetu PIN Mappings'
+        indexes = [models.Index(fields=['worksetu_sub_cluster'])]
+
+    def __str__(self):
+        return f"PIN {self.supply_pin} → {self.worksetu_sub_cluster}"
+
+
+class SalesPipeline(models.Model):
+    """
+    Sales / business-development opportunities.
+    Source: Sales_Pipeline.xlsx (each row = one opportunity).
+    Used in MIS Summary → Sales Pipeline table (TM → Centre → Stage drill-down).
+    """
+    opp_id        = models.CharField(max_length=50, blank=True, db_index=True)
+    created       = models.DateField(null=True, blank=True)
+    centre_name   = models.CharField(max_length=255, blank=True, db_index=True)
+    centre        = models.ForeignKey(Centre, on_delete=models.SET_NULL, null=True, blank=True, to_field='centre_id')
+    account_client = models.CharField(max_length=255, blank=True)
+    client_type   = models.CharField(max_length=100, blank=True)
+    sector        = models.CharField(max_length=255, blank=True)
+    service_line  = models.CharField(max_length=255, blank=True)
+    exp_positions = models.IntegerField(default=0)
+    deal_value    = models.FloatField(default=0)
+    stage         = models.CharField(max_length=100, blank=True, db_index=True)
+    prob          = models.FloatField(default=0)
+    weighted      = models.FloatField(default=0)
+    exp_close     = models.DateField(null=True, blank=True)
+    status        = models.CharField(max_length=100, blank=True)
+    next_step     = models.CharField(max_length=255, blank=True)
+    last_activity = models.DateField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.opp_id} — {self.account_client} ({self.stage})"
+
+
+class RecruitmentFunnel(models.Model):
+    """
+    Recruitment requisitions and their funnel metrics.
+    Source: Recruitment_Funnel.xlsx (each row = one requisition).
+    Used in MIS Summary → Recruitment Funnel table (TM → Centre → Client drill-down).
+    """
+    req_id        = models.CharField(max_length=50, blank=True, db_index=True)
+    month         = models.CharField(max_length=20, blank=True)
+    centre_name   = models.CharField(max_length=255, blank=True, db_index=True)
+    centre        = models.ForeignKey(Centre, on_delete=models.SET_NULL, null=True, blank=True, to_field='centre_id')
+    client        = models.CharField(max_length=255, blank=True)
+    job_role      = models.CharField(max_length=255, blank=True)
+    sector        = models.CharField(max_length=255, blank=True)
+    open_vacancies = models.IntegerField(default=0)   # Open Vacancies / Target Hire
+    sourced       = models.IntegerField(default=0)
+    screened      = models.IntegerField(default=0)
+    interviewed   = models.IntegerField(default=0)
+    offered       = models.IntegerField(default=0)
+    joined        = models.IntegerField(default=0)
+    dropped       = models.IntegerField(default=0)   # Dropped (post-offer)
+
+    def __str__(self):
+        return f"{self.req_id} — {self.client} ({self.job_role})"

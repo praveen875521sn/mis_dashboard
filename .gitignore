@@ -8,3 +8,7 @@ db.sqlite3.old
 .vscode/
 .DS_Store
 *.log
+
+# Excel temp locks
+~$*.xlsx
+views_before.py

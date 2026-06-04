@@ -45,6 +45,8 @@
       {% with qs="?cluster="|add:c|add:"&sub_cluster="|add:sc %}
       <a href="{% url 'home' %}{{ qs }}"
          class="{% if request.resolver_match.url_name == 'home' %}active{% endif %}">🏠 Home</a>
+      <a href="{% url 'mis_summary' %}{{ qs }}"
+         class="{% if request.resolver_match.url_name == 'mis_summary' %}active{% endif %}">📋 MIS Summary</a>
       <a href="{% url 'index' %}{{ qs }}"
          class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}">📊 Employability</a>
       <a href="{% url 'smb' %}{{ qs }}"
@@ -57,6 +59,8 @@
     {% else %}
       <a href="{% url 'home' %}"
          class="{% if request.resolver_match.url_name == 'home' %}active{% endif %}">🏠 Home</a>
+      <a href="{% url 'mis_summary' %}"
+         class="{% if request.resolver_match.url_name == 'mis_summary' %}active{% endif %}">📋 MIS Summary</a>
       <a href="{% url 'index' %}"
          class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}">📊 Employability</a>
       <a href="{% url 'smb' %}"

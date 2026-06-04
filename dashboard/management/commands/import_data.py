@@ -5,7 +5,7 @@ from django.core.management.base import BaseCommand
 from dashboard.models import (Centre, BatchPlan, CertSchedule, ManpowerStaff,
                               CommunityCollege, HyperlocalJob, NapsEligible,
                               ClusterMaster, SambhavCommunity, NAPSData, NAPSPlan,
-                              OutreachStatus)
+                              OutreachStatus, SalesPipeline, RecruitmentFunnel)
 
 
 # India bounding box (lat 6–38, lng 67–98). Anything outside is treated as junk.
@@ -80,6 +80,25 @@ def safe_str(val):
     if pd.isna(val):
         return ''
     return str(val).strip()
+
+
+# Maps dirty / non-standard Center Master state spellings to the clean
+# state names used in Associate Data (so Supply State filtering matches).
+_STATE_FIXES = {
+    'gujarat':        'Gujarat',
+    'karnataka':      'Karnataka',
+    'maharashtra':    'Maharashtra',
+    'telelanga':      'Telangana',
+    'telangana':      'Telangana',
+    'kolkata':        'West Bengal',
+    'dadra & nagar haveli': 'The Dadra And Nagar Haveli And Daman And Diu',
+}
+
+def _normalize_state(val):
+    s = safe_str(val)
+    if not s:
+        return ''
+    return _STATE_FIXES.get(s.lower(), s)
 
 
 def safe_float(val):
@@ -183,6 +202,7 @@ class Command(BaseCommand):
                         'cluster':        safe_str(row.get('Cluster', '')),
                         'sub_cluster':    safe_str(row.get('Sub Cluster', '')),
                         'entity':         safe_str(row.get('Entity', '')),
+                        'state':          _normalize_state(safe_str(row.get('State', ''))),
                         'center_status':  safe_str(row.get(
                             'Center Status (Active/ Closed/ Going to Close)', '')),
                     }
@@ -208,6 +228,7 @@ class Command(BaseCommand):
                     'sub_cluster_id': cm_data.get('sub_cluster_id', ''),
                     'cluster':        cm_data.get('cluster', ''),
                     'sub_cluster':    cm_data.get('sub_cluster', ''),
+                    'state':          cm_data.get('state', ''),
                     'entity':         cm_data.get('entity', ''),
                     'center_status':  cm_data.get('center_status', ''),
                 }
@@ -283,6 +304,11 @@ class Command(BaseCommand):
                     'fy_e_act': safe_int(col(row, 'FY 26-27 E Act')),
                     'fy_c_act': safe_int(col(row, 'FY 26-27 C Act')),
                     'fy_p_act': safe_int(col(row, 'FY 26-27 P Act')),
+                    'fy_naps_act': safe_int(col(row, 'FY 26-27 NAPS Act')),
+                    'fy_nats_act': safe_int(col(row, 'FY 26-27 NATS Act')),
+
+                    # Entity (SF / LLF)
+                    'entity':   safe_str(col(row, 'Entity')),
                 }
             )
             created += 1
@@ -411,23 +437,94 @@ class Command(BaseCommand):
             naps_df = pd.read_excel(naps_path)
             created = 0
             for _, row in naps_df.iterrows():
-                qp = safe_str(row.get('QP', ''))
+                # File uses 'QP Name' column (not 'QP')
+                qp = safe_str(row.get('QP Name', '') or row.get('QP', ''))
                 if not qp:
                     continue
                 NapsEligible.objects.create(
                     qp=qp,
                     naps_eligible=safe_str(row.get('NAPS Eligible', '')),
-                    course_name=safe_str(row.get('course_name', '')),
-                    course_type=safe_str(row.get('course_type', '')),
-                    sector=safe_str(row.get('sector/Industry', '')),
+                    course_name=safe_str(row.get('course_name', '') or row.get('Course Name', '')),
+                    course_type=safe_str(row.get('course_type', '') or row.get('Course Type', '')),
+                    sector=safe_str(row.get('Sector', '') or row.get('sector/Industry', '')),
                     minimum_qualification=safe_str(row.get('minimum_qualification', '')),
                     on_job_training=safe_str(row.get('on_job_training', '')),
                     qp_mapped=safe_str(row.get('QP mapped (yes/no)', '')),
+                    # New alignment flags from updated NAPS Eligible.xlsx
+                    naps_aligned=safe_str(row.get('NAPS Aligned', '')),
+                    nats_aligned=safe_str(row.get('NATS Aligned', '')),
                 )
                 created += 1
             self.stdout.write(f'  {created} NAPS records loaded')
         except FileNotFoundError:
             self.stdout.write(f'  Skipping NAPS Eligible (file not found: {naps_path})')
+
+        # 7b. Import Sales Pipeline
+        import os
+        sp_path = f'{data_dir}/Sales_Pipeline.xlsx'
+        if os.path.exists(sp_path):
+            self.stdout.write('Importing Sales Pipeline...')
+            SalesPipeline.objects.all().delete()
+            sp_df = pd.read_excel(sp_path)
+            # Resolve centre by name
+            centre_by_name = {c.centre_name: c for c in Centre.objects.all()}
+            created = 0
+            for _, row in sp_df.iterrows():
+                cname = safe_str(row.get('Center Name', ''))
+                SalesPipeline.objects.create(
+                    opp_id=safe_str(row.get('Opp ID', '')),
+                    created=safe_date(row.get('Created')),
+                    centre_name=cname,
+                    centre=centre_by_name.get(cname),
+                    account_client=safe_str(row.get('Account / Client', '')),
+                    client_type=safe_str(row.get('Client Type', '')),
+                    sector=safe_str(row.get('Sector', '')),
+                    service_line=safe_str(row.get('Service Line', '')),
+                    exp_positions=safe_int(row.get('Exp. Positions')),
+                    deal_value=safe_int(row.get('Deal Value ₹')),
+                    stage=safe_str(row.get('Stage', '')),
+                    prob=float(row.get('Prob.') or 0),
+                    weighted=safe_int(row.get('Weighted ₹')),
+                    exp_close=safe_date(row.get('Exp. Close')),
+                    status=safe_str(row.get('Status', '')),
+                    next_step=safe_str(row.get('Next Step', '')),
+                    last_activity=safe_date(row.get('Last Activity')),
+                )
+                created += 1
+            self.stdout.write(f'  {created} sales pipeline records loaded')
+        else:
+            self.stdout.write(f'  Skipping Sales Pipeline (file not found: {sp_path})')
+
+        # 7c. Import Recruitment Funnel
+        rf_path = f'{data_dir}/Recruitment_Funnel.xlsx'
+        if os.path.exists(rf_path):
+            self.stdout.write('Importing Recruitment Funnel...')
+            RecruitmentFunnel.objects.all().delete()
+            rf_df = pd.read_excel(rf_path)
+            centre_by_name = {c.centre_name: c for c in Centre.objects.all()}
+            created = 0
+            for _, row in rf_df.iterrows():
+                cname = safe_str(row.get('Center Name', ''))
+                RecruitmentFunnel.objects.create(
+                    req_id=safe_str(row.get('Req ID', '')),
+                    month=safe_str(row.get('Month', '')),
+                    centre_name=cname,
+                    centre=centre_by_name.get(cname),
+                    client=safe_str(row.get('Client', '')),
+                    job_role=safe_str(row.get('Job Role', '')),
+                    sector=safe_str(row.get('Sector', '')),
+                    open_vacancies=safe_int(row.get('Open Vacancies/ Target Hire')),
+                    sourced=safe_int(row.get('Sourced')),
+                    screened=safe_int(row.get('Screened')),
+                    interviewed=safe_int(row.get('Interviewed')),
+                    offered=safe_int(row.get('Offered')),
+                    joined=safe_int(row.get('Joined')),
+                    dropped=safe_int(row.get('Dropped (post-offer)')),
+                )
+                created += 1
+            self.stdout.write(f'  {created} recruitment funnel records loaded')
+        else:
+            self.stdout.write(f'  Skipping Recruitment Funnel (file not found: {rf_path})')
 
         # Import Cert Schedule
         cs_path = f'{data_dir}/Cert_Schedule.xlsx'

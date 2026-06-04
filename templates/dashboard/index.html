@@ -375,6 +375,77 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
+     SOURCING SUMMARY (Community Sources & Categories)
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div class="card" id="sourcing-summary-card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div class="card-title">🎯 Sourcing Summary</div>
+      <div style="font-size:12px;color:var(--muted);">
+        Community Sources &amp; Categories — Active = at least one matching candidate in Actual data
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select id="ss-centre-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
+        <option value="">All Centres</option>
+        {% for c in centres %}
+          <option value="{{ c.centre_id }}" {% if c.centre_id == centre_id_filter %}selected{% endif %}>{{ c.centre_name }}</option>
+        {% endfor %}
+      </select>
+      <span id="ss-summary" style="font-size:12px;color:var(--muted);white-space:nowrap;">Loading...</span>
+    </div>
+  </div>
+
+  <!-- Legend: coloured dots per Community Source (matches the mock screenshot) -->
+  <div id="ss-legend" style="display:flex;flex-wrap:wrap;gap:14px 22px;padding:10px 16px 6px 16px;font-size:12px;color:var(--muted);"></div>
+
+  <div class="card-body table-wrap">
+    <table id="ss-table">
+      <thead>
+        <tr>
+          <th class="left" style="width:36px;"></th>
+          <th class="left">Community Source / Category</th>
+          <th style="text-align:right;">Candidate Count</th>
+          <th>Status</th>
+          <th style="text-align:right;">Categories</th>
+        </tr>
+      </thead>
+      <tbody id="ss-tbody">
+        <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  /* Sourcing Summary – local styles (scoped to the card) */
+  #sourcing-summary-card .ss-dot {
+    display:inline-block; width:10px; height:10px; border-radius:50%;
+    margin-right:8px; vertical-align:middle; flex-shrink:0;
+  }
+  #sourcing-summary-card .ss-source-row {
+    cursor:pointer; transition:background .15s;
+  }
+  #sourcing-summary-card .ss-source-row:hover { background:#f8fafc; }
+  #sourcing-summary-card .ss-source-row td { font-weight:600; }
+  #sourcing-summary-card .ss-chev {
+    display:inline-block; width:18px; text-align:center;
+    transition:transform .18s; color:var(--muted); font-size:11px;
+  }
+  #sourcing-summary-card .ss-source-row.open .ss-chev { transform:rotate(90deg); }
+  #sourcing-summary-card .ss-cat-row td {
+    background:#f8fafc; font-weight:400; font-size:13px; padding-left:22px;
+  }
+  #sourcing-summary-card .ss-cat-row td.ss-cat-name { padding-left:54px; color:var(--text); }
+  #sourcing-summary-card .ss-badge {
+    display:inline-block; padding:2px 10px; border-radius:999px;
+    font-size:11px; font-weight:600; letter-spacing:.3px;
+  }
+  #sourcing-summary-card .ss-badge.active   { background:#d1fae5; color:#065f46; }
+  #sourcing-summary-card .ss-badge.inactive { background:#fee2e2; color:#991b1b; }
+</style>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
      HYPERLOCAL JOBS TABLE
      ═══════════════════════════════════════════════════════════════════════════ -->
 <!-- Manpower Table -->
@@ -795,6 +866,137 @@ loadCommunityColleges();   // will show placeholder since no centre selected
     loadCommunityColleges();
   }
 })();
+
+// ── Sourcing Summary loader ──────────────────────────────────────────────────
+//
+// Renders the Source → Category tree from /api/sourcing-summary/.
+// Source rows are clickable: clicking toggles the visibility of the child
+// Category rows that follow it (no second network call — categories arrive
+// with the source payload). Active/Inactive badges are computed server-side
+// and respect the chosen centre filter.
+
+const SS_SOURCE_COLORS = {
+  'Community Mobilisation':            '#ef4444',  // red
+  'Training & Education Institutions': '#3b82f6',  // blue
+  'Government Ecosystem':              '#10b981',  // green
+  'Referral-Based Sourcing':           '#f59e0b',  // amber
+  'Digital / WhatsApp Campaigns':      '#94a3b8',  // slate
+  'Employer-Linked Sourcing':          '#a855f7',  // purple
+};
+const SS_DEFAULT_COLOR = '#64748b';
+
+function ssColor(src) {
+  return SS_SOURCE_COLORS[src] || SS_DEFAULT_COLOR;
+}
+
+function ssFmtCount(n) {
+  return (n || 0).toLocaleString('en-IN');
+}
+
+function ssBadge(active) {
+  return active
+    ? '<span class="ss-badge active">Active</span>'
+    : '<span class="ss-badge inactive">Inactive</span>';
+}
+
+function renderSourcingLegend(sources) {
+  // Show each source once, in the order returned by the API.
+  const seen = new Set();
+  const items = [];
+  for (const s of sources) {
+    if (seen.has(s.source)) continue;
+    seen.add(s.source);
+    items.push(
+      `<span style="display:inline-flex;align-items:center;">
+         <span class="ss-dot" style="background:${ssColor(s.source)};"></span>${s.source}
+       </span>`
+    );
+  }
+  document.getElementById('ss-legend').innerHTML = items.join('');
+}
+
+function renderSourcingTable(data) {
+  const tbody = document.getElementById('ss-tbody');
+  if (!data.sources || data.sources.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">No sourcing data found</td></tr>';
+    return;
+  }
+
+  const html = [];
+  data.sources.forEach((s, idx) => {
+    const color = ssColor(s.source);
+    // Parent (Source) row
+    html.push(`
+      <tr class="ss-source-row" data-idx="${idx}">
+        <td class="left" style="text-align:center;"><span class="ss-chev">▶</span></td>
+        <td class="left">
+          <span class="ss-dot" style="background:${color};"></span>${s.source}
+        </td>
+        <td style="text-align:right;">${ssFmtCount(s.count)}</td>
+        <td style="text-align:center;">${ssBadge(s.active)}</td>
+        <td style="text-align:right;font-weight:500;">
+          <span style="color:var(--muted);">${s.category_active}/${s.category_total}</span>
+        </td>
+      </tr>
+    `);
+    // Child (Category) rows — hidden by default
+    s.categories.forEach(cat => {
+      html.push(`
+        <tr class="ss-cat-row" data-parent="${idx}" style="display:none;">
+          <td></td>
+          <td class="left ss-cat-name">${cat.category}</td>
+          <td style="text-align:right;">${ssFmtCount(cat.count)}</td>
+          <td style="text-align:center;">${ssBadge(cat.active)}</td>
+          <td></td>
+        </tr>
+      `);
+    });
+  });
+  tbody.innerHTML = html.join('');
+
+  // Wire expand/collapse
+  tbody.querySelectorAll('.ss-source-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const idx = row.dataset.idx;
+      const isOpen = row.classList.toggle('open');
+      tbody.querySelectorAll(`.ss-cat-row[data-parent="${idx}"]`).forEach(r => {
+        r.style.display = isOpen ? '' : 'none';
+      });
+    });
+  });
+}
+
+function loadSourcingSummary() {
+  const centreId = document.getElementById('ss-centre-filter').value;
+  const summaryEl = document.getElementById('ss-summary');
+  summaryEl.textContent = 'Loading...';
+  document.getElementById('ss-tbody').innerHTML =
+    '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+
+  const params = new URLSearchParams();
+  if (centreId) params.set('centre_id', centreId);
+
+  fetch(`/api/sourcing-summary/?${params}`)
+    .then(r => r.json())
+    .then(data => {
+      const t = data.totals || {};
+      summaryEl.textContent =
+        `${t.active_sources || 0}/${t.sources || 0} Sources Active · ` +
+        `${t.categories || 0} Categories · ` +
+        `${ssFmtCount(t.leads)} Leads`;
+      renderSourcingLegend(data.sources || []);
+      renderSourcingTable(data);
+    })
+    .catch(err => {
+      console.error('Sourcing summary load failed', err);
+      summaryEl.textContent = 'Failed to load';
+      document.getElementById('ss-tbody').innerHTML =
+        '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--danger);">Failed to load sourcing summary</td></tr>';
+    });
+}
+
+document.getElementById('ss-centre-filter').addEventListener('change', loadSourcingSummary);
+loadSourcingSummary();
 
 // ════════════════════════════════════════════════════════════════════════════
 // STAFFING TAB JS

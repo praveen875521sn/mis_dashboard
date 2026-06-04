@@ -3,6 +3,11 @@ from . import views
 
 urlpatterns = [
     path('', views.home, name='home'),
+    path('mis-summary/', views.mis_summary_view, name='mis_summary'),
+    path('api/mis/drilldown/', views.mis_drilldown_api, name='mis_drilldown_api'),
+    path('api/mis/filter-options/', views.mis_filter_options_api, name='mis_filter_options_api'),
+    path('api/mis/sales-pipeline/',     views.sales_pipeline_api,     name='sales_pipeline_api'),
+    path('api/mis/recruitment-funnel/', views.recruitment_funnel_api, name='recruitment_funnel_api'),
     path('employability/', views.index, name='index'),
     path('smb/', views.smb_view, name='smb'),
     path('sahi/', views.sahi_view, name='sahi'),
@@ -11,6 +16,7 @@ urlpatterns = [
     path('api/filter-options/', views.filter_options_api, name='filter_options_api'),
     path('api/community-colleges/', views.community_colleges_api, name='community_colleges_api'),
     path('api/community-college-categories/', views.community_college_categories_api, name='community_college_categories_api'),
+    path('api/sourcing-summary/', views.sourcing_summary_api, name='sourcing_summary_api'),
     path('api/hyperlocal-jobs/', views.hyperlocal_jobs_api, name='hyperlocal_jobs_api'),
     path('api/naps/', views.naps_api, name='naps_api'),
     path('api/smb/cert-filter-options/',       views.smb_cert_filter_options_api,    name='smb_cert_filter_options_api'),
@@ -32,8 +38,12 @@ urlpatterns = [
     path('api/staffing/sf-colleges/', views.staffing_sf_colleges_api, name='staffing_sf_colleges_api'),
     path('api/staffing/filter-options/', views.staffing_filter_options_api, name='staffing_filter_options_api'),
     # ── SAHI module APIs ──
-    path('api/sahi/filter-options/', views.sahi_filter_options_api, name='sahi_filter_options_api'),
-    path('api/sahi/demand-table/',   views.sahi_demand_table_api,   name='sahi_demand_table_api'),
-    path('api/sahi/centre-table/',   views.sahi_centre_table_api,   name='sahi_centre_table_api'),
-    path('api/sahi/diploma-table/',  views.sahi_diploma_table_api,  name='sahi_diploma_table_api'),
+    path('api/sahi/filter-options/',   views.sahi_filter_options_api,   name='sahi_filter_options_api'),
+    path('api/sahi/demand-table/',     views.sahi_demand_table_api,     name='sahi_demand_table_api'),
+    path('api/sahi/centre-table/',     views.sahi_centre_table_api,     name='sahi_centre_table_api'),
+    path('api/sahi/qp-batch/',         views.sahi_qp_batch_api,         name='sahi_qp_batch_api'),
+    path('api/sahi/diploma-table/',    views.sahi_diploma_table_api,    name='sahi_diploma_table_api'),
+    path('api/sahi/supply-summary/',      views.sahi_supply_summary_api,          name='sahi_supply_summary_api'),
+    path('api/sahi/worksetu-filter/',     views.sahi_worksetu_filter_options_api, name='sahi_worksetu_filter_options_api'),
+    path('api/sahi/iti-polytechnic/',     views.sahi_iti_polytechnic_api,         name='sahi_iti_polytechnic_api'),
 ]

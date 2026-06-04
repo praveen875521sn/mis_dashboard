@@ -7,8 +7,8 @@ Usage:
 Re-running clears & reloads the SAHIDemand table.
 
 Files schema:
-  SAHI_Demand_Master.xlsx (12 cols):
-    Sub Cluster ID | Cluster | Sub Cluster | Region | Existing/Potential |
+  SAHI_Demand_Master.xlsx (13 cols):
+    Sub Cluster ID | Cluster | Sub Cluster | Region | Zone | Existing/Potential |
     Demand City | Location | Existing Client | Client Nature |
     Designation | HC | Monthly Demand
 
@@ -80,6 +80,7 @@ class Command(BaseCommand):
                 cluster            = _safe_str(col(row, 'Cluster')),
                 sub_cluster        = _safe_str(col(row, 'Sub Cluster')),
                 region             = _safe_str(col(row, 'Region')),
+                zone               = _safe_str(col(row, 'Zone')),
                 existing_potential = _safe_str(col(row, 'Existing/Potential')),
                 demand_city        = _safe_str(col(row, 'Demand City')),
                 location           = _safe_str(col(row, 'Location')),

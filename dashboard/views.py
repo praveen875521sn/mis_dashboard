@@ -5,10 +5,14 @@ from datetime import date
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 
-from .models import (BatchPlan, Centre, ClusterMaster, CommunityCollege,
-                     DemandSupply, HyperlocalJob, ITIDiplomaMaster,
+from .models import (AssociateData, BatchPlan, Centre, ClusterMaster,
+                     CommunityCollege, DemandSupply, DesignationQPMap,
+                     HyperlocalJob,
+                     ITIDiplomaMaster, ITIPolytechnicByPIN,
                      ManpowerStaff, NapsEligible,
-                     SAHIDemand, SambhavCommunity, SFInterventionCollege)
+                     SAHIDemand, SambhavCommunity, SFInterventionCollege,
+                     SourcingActual, SourcingChannelMaster,
+                     WorkSetuPINMap)
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -94,23 +98,30 @@ def normalise_eid(raw):
 
 def build_staff_status(candidates_qs, manpower_qs, centre_ids=None):
     """
-    Build Trainer + Mobilizer status from Manpower_Master_1 × Trainer_Target / Mobilsier_Target.
+    Build Mobilizer + (NEW) Attendance / Duration tables.
 
-    NEW LOGIC (target-based):
-      MOBILIZER → row per Mobilizer in Manpower (filtered to centre_ids if given).
-        Match by Ecode = MobiliserTarget.mobiliser_id.
-        Matched   → show this month's E Target / E Act / % achieved (rolled up).
-        Unmatched → "Idle (Target not assigned)".
-      TRAINER → row per Trainer in Manpower (filtered to centre_ids if given).
-        Match by Ecode = TrainerTarget.trainer_id.
-        Matched   → show day-wise hours (May 1-31 etc. dynamic).
-        Unmatched → "Idle (Target not assigned)".
+    MOBILIZER (unchanged) → row per Mobilizer in Manpower; matched against
+        MobiliserTarget by Ecode = mobiliser_id. Shows E Target / E Act / %.
+        Unmatched mobilizers → "Idle (Target not assigned)".
+
+    ATTENDANCE (new) → row per (Batch × Trainer) from
+        TrainerProductivityPresent. Columns: Centre, QP, Trainer, Enrolled,
+        day-wise Present, Total Present, Present %.
+
+    DURATION (new) → row per (Batch × Trainer) from
+        TrainerProductivityDuration. Columns: Centre, QP, Trainer, day-wise
+        hours, Total Hours, Days worked.
 
     `candidates_qs` is kept for signature compat but unused.
-    `centre_ids` (optional) restricts the manpower roster (e.g. on Centre detail).
+    `centre_ids` (optional) restricts BOTH the manpower roster AND the
+    productivity tables (e.g. on Centre detail).
     """
     from collections import defaultdict
-    from dashboard.models import MobiliserTarget, TrainerTarget, TrainerTargetDay
+    from dashboard.models import (
+        MobiliserTarget,
+        TrainerProductivityPresent, TrainerProductivityPresentDay,
+        TrainerProductivityDuration, TrainerProductivityDurationDay,
+    )
 
     # ── Roster (from Manpower master, filtered by centres) ──────────────────
     mp_qs = manpower_qs
@@ -121,7 +132,6 @@ def build_staff_status(candidates_qs, manpower_qs, centre_ids=None):
     def _role_norm(r):
         return (r or '').strip().lower()
 
-    trainers   = [s for s in mp_list if 'trainer'   in _role_norm(s.role)]
     mobilizers = [s for s in mp_list if 'mobilizer' in _role_norm(s.role)]
 
     # ── Mobilizer roll-up by Ecode ──────────────────────────────────────────
@@ -185,65 +195,100 @@ def build_staff_status(candidates_qs, manpower_qs, centre_ids=None):
 
     mobilizer_rows.sort(key=lambda r: (r['in_target'] is False, r['centre'], r['name']))
 
-    # ── Trainer roll-up by Ecode (with day-wise hours) ──────────────────────
-    # Collect all distinct date columns observed in Trainer_Target → these are the
-    # day headers in the table.
-    all_dates = sorted(set(TrainerTargetDay.objects.values_list('date', flat=True).distinct()))
+    # ── Attendance Performance (NEW) ────────────────────────────────────────
+    # Row per (Batch × Trainer) from Trainer_productivity_present.
+    pres_qs = TrainerProductivityPresent.objects.all()
+    dur_qs  = TrainerProductivityDuration.objects.all()
+    if centre_ids:
+        pres_qs = pres_qs.filter(centre_id__in=centre_ids)
+        dur_qs  = dur_qs.filter(centre_id__in=centre_ids)
 
-    # Hours per (trainer_id, date)
-    hours_by_eid_date = defaultdict(float)
-    targets_by_eid    = defaultdict(list)  # trainer_id -> list of TrainerTarget rows
-    for tt in TrainerTarget.objects.prefetch_related('days'):
-        targets_by_eid[tt.trainer_id].append(tt)
-        for d in tt.days.all():
-            hours_by_eid_date[(tt.trainer_id, d.date)] += d.hours
+    # Collect all observed dates across BOTH tables so the day-column header
+    # is the same on both tables.
+    all_dates = sorted(set(
+        list(TrainerProductivityPresentDay.objects
+             .filter(parent__in=pres_qs)
+             .values_list('date', flat=True).distinct())
+        +
+        list(TrainerProductivityDurationDay.objects
+             .filter(parent__in=dur_qs)
+             .values_list('date', flat=True).distinct())
+    ))
 
-    trainer_rows = []
-    for s in trainers:
-        try:
-            eid_int = int(str(s.ecode).strip())
-        except (TypeError, ValueError):
-            eid_int = None
-        targets = targets_by_eid.get(eid_int, [])
-        if targets:
-            day_hours = [round(hours_by_eid_date.get((eid_int, d), 0), 1) for d in all_dates]
-            total_hours = round(sum(day_hours), 1)
-            days_worked = sum(1 for h in day_hours if h > 0)
-            row = {
-                'eid':          str(s.ecode),
-                'name':         s.employee_name,
-                'centre':       s.center_name_ops or '—',
-                'status':       'Active',
-                'status_class': 'occupied',
-                'day_hours':    day_hours,
-                'total_hours':  total_hours,
-                'days_worked':  days_worked,
-                'in_target':    True,
-            }
+    # Day-present index: {parent_id: {date: present}}
+    pres_days_index = defaultdict(dict)
+    for d in TrainerProductivityPresentDay.objects.filter(parent__in=pres_qs):
+        pres_days_index[d.parent_id][d.date] = d.present
+
+    attendance_rows = []
+    for p in pres_qs.order_by('centre_name', 'trainer_name', 'batch_id'):
+        days = pres_days_index.get(p.id, {})
+        day_counts  = [days.get(d) for d in all_dates]  # None if no class that day
+        total_present = sum(v for v in day_counts if v is not None)
+        days_held     = sum(1 for v in day_counts if v is not None)
+        enrolled      = p.enrolled or 0
+        # Present % = average daily attendance across days the class was held.
+        if enrolled > 0 and days_held > 0:
+            present_pct = round(total_present * 100 / (enrolled * days_held), 1)
         else:
-            row = {
-                'eid':          str(s.ecode),
-                'name':         s.employee_name,
-                'centre':       s.center_name_ops or '—',
-                'status':       'Idle (Target not assigned)',
-                'status_class': 'idle',
-                'day_hours':    [0] * len(all_dates),
-                'total_hours':  0,
-                'days_worked':  0,
-                'in_target':    False,
-            }
-        trainer_rows.append(row)
+            present_pct = 0
+        attendance_rows.append({
+            'batch_id':     p.batch_id,
+            'centre_name':  p.centre_name,
+            'centre_id':    p.centre_id,
+            'qp_name':      p.qp_name,
+            'trainer_name': p.trainer_name,
+            'trainer_id':   p.trainer_id,
+            'enrolled':     enrolled,
+            'day_present':  day_counts,           # list with same len as all_dates
+            'total_present': total_present,
+            'days_held':    days_held,
+            'present_pct':  present_pct,
+        })
 
-    trainer_rows.sort(key=lambda r: (r['in_target'] is False, r['centre'], r['name']))
+    # Day-duration index: {parent_id: {date: hours}}
+    dur_days_index = defaultdict(dict)
+    for d in TrainerProductivityDurationDay.objects.filter(parent__in=dur_qs):
+        dur_days_index[d.parent_id][d.date] = d.hours
+
+    duration_rows = []
+    for p in dur_qs.order_by('centre_name', 'trainer_name', 'batch_id'):
+        days = dur_days_index.get(p.id, {})
+        day_hours = [days.get(d) for d in all_dates]   # None means no session
+        total_hours = round(sum(h for h in day_hours if h), 1)
+        days_worked = sum(1 for h in day_hours if h)
+        duration_rows.append({
+            'batch_id':     p.batch_id,
+            'centre_name':  p.centre_name,
+            'centre_id':    p.centre_id,
+            'qp_name':      p.qp_name,
+            'trainer_name': p.trainer_name,
+            'trainer_id':   p.trainer_id,
+            'day_hours':    day_hours,
+            'total_hours':  total_hours,
+            'days_worked':  days_worked,
+        })
+
+    # Counts of unique trainers represented in each table
+    attendance_trainers = len({r['trainer_id'] for r in attendance_rows})
+    duration_trainers   = len({r['trainer_id'] for r in duration_rows})
 
     return {
-        # Trainer
-        'trainer_rows':       trainer_rows,
-        'trainer_active':     sum(1 for r in trainer_rows if r['in_target']),
-        'trainer_idle':       sum(1 for r in trainer_rows if not r['in_target']),
-        'trainer_dates':      [d.strftime('%d') for d in all_dates],  # ['01','02',…]
-        'trainer_month':      all_dates[0].strftime('%b %Y') if all_dates else '',
-        # Mobilizer
+        # Attendance (NEW — replaces old trainer_rows)
+        'attendance_rows':     attendance_rows,
+        'attendance_dates':    [d.strftime('%d') for d in all_dates],
+        'attendance_month':    all_dates[0].strftime('%b %Y') if all_dates else '',
+        'attendance_batches':  len(attendance_rows),
+        'attendance_trainers': attendance_trainers,
+
+        # Duration (NEW)
+        'duration_rows':       duration_rows,
+        'duration_dates':      [d.strftime('%d') for d in all_dates],
+        'duration_month':      all_dates[0].strftime('%b %Y') if all_dates else '',
+        'duration_batches':    len(duration_rows),
+        'duration_trainers':   duration_trainers,
+
+        # Mobilizer (unchanged)
         'mobilizer_rows':     mobilizer_rows,
         'mobilizer_active':   sum(1 for r in mobilizer_rows if r['in_target']),
         'mobilizer_idle':     sum(1 for r in mobilizer_rows if not r['in_target']),
@@ -927,61 +972,111 @@ def sahi_view(request):
 def sahi_filter_options_api(request):
     """
     Cascading filter options for the SAHI page.
-    Drives from Cluster → Sub Cluster (the new taxonomy).
-    Union of Cluster Master + Center Master + SAHIDemand so all known
-    clusters/sub-clusters appear, even those without centres or demand.
+    Cascade: Zone → Region → Cluster → Sub Cluster → Existing Client
+    Zone  = SAHIDemand.zone  (Production / Technology & Services)
+    Region = SAHIDemand.region (Karan/West, Ram/South, etc.)
     """
-    cluster      = request.GET.get('cluster', '')
-    sub_cluster  = request.GET.get('sub_cluster', '')
+    zone            = request.GET.get('zone', '')
+    region          = request.GET.get('region', '')
+    cluster         = request.GET.get('cluster', '')
+    sub_cluster     = request.GET.get('sub_cluster', '')
 
+    base_qs = SAHIDemand.objects.all()
+
+    # All zones
+    zones = sorted(set(base_qs.exclude(zone='').exclude(zone=None).values_list('zone', flat=True)))
+
+    # Regions — narrow by zone
+    region_qs = base_qs.exclude(region='').exclude(region=None)
+    if zone:
+        region_qs = region_qs.filter(zone=zone)
+    regions = sorted(set(region_qs.values_list('region', flat=True)))
+
+    # Clusters — narrow by zone + region, union with master tables
+    demand_qs_cl = base_qs.exclude(cluster='')
+    if zone:    demand_qs_cl = demand_qs_cl.filter(zone=zone)
+    if region:  demand_qs_cl = demand_qs_cl.filter(region=region)
     clusters = sorted(
         set(ClusterMaster.objects.exclude(cluster='').values_list('cluster', flat=True))
         | set(Centre.objects.exclude(cluster='').exclude(cluster=None).values_list('cluster', flat=True))
-        | set(SAHIDemand.objects.exclude(cluster='').values_list('cluster', flat=True))
+        | set(demand_qs_cl.values_list('cluster', flat=True))
     )
 
+    # Sub Clusters — narrow by zone + region + cluster
+    sc_qs = base_qs.exclude(sub_cluster='')
+    if zone:    sc_qs = sc_qs.filter(zone=zone)
+    if region:  sc_qs = sc_qs.filter(region=region)
+    if cluster: sc_qs = sc_qs.filter(cluster=cluster)
     sc_qs_master = ClusterMaster.objects.exclude(sub_cluster='')
     sc_qs_centre = Centre.objects.exclude(sub_cluster='').exclude(sub_cluster=None)
-    sc_qs_demand = SAHIDemand.objects.exclude(sub_cluster='')
     if cluster:
         sc_qs_master = sc_qs_master.filter(cluster=cluster)
         sc_qs_centre = sc_qs_centre.filter(cluster=cluster)
-        sc_qs_demand = sc_qs_demand.filter(cluster=cluster)
     sub_clusters = sorted(
         set(sc_qs_master.values_list('sub_cluster', flat=True))
         | set(sc_qs_centre.values_list('sub_cluster', flat=True))
-        | set(sc_qs_demand.values_list('sub_cluster', flat=True))
+        | set(sc_qs.values_list('sub_cluster', flat=True))
     )
 
+    # Existing Clients — narrow by all active filters
+    ec_qs = base_qs.exclude(existing_client='')
+    if zone:        ec_qs = ec_qs.filter(zone=zone)
+    if region:      ec_qs = ec_qs.filter(region=region)
+    if cluster:     ec_qs = ec_qs.filter(cluster=cluster)
+    if sub_cluster: ec_qs = ec_qs.filter(sub_cluster=sub_cluster)
+    existing_clients = sorted(set(ec_qs.values_list('existing_client', flat=True)))
+
     return JsonResponse({
-        'clusters':     clusters,
-        'sub_clusters': sub_clusters,
+        'zones':            zones,
+        'regions':          regions,
+        'clusters':         clusters,
+        'sub_clusters':     sub_clusters,
+        'existing_clients': existing_clients,
     })
 
 
 def sahi_demand_table_api(request):
     """
     Table 1 — Existing Client wise rows: Designation, HC, Monthly Demand.
-    Filters: cluster, sub_cluster (direct match on SAHIDemand columns).
+    Filters: zone, region, cluster, sub_cluster, existing_client
+    KPI counts: prod_sub_clusters, tech_sub_clusters (by SAHIDemand.zone field)
     """
-    cluster     = request.GET.get('cluster', '')
-    sub_cluster = request.GET.get('sub_cluster', '')
+    zone            = request.GET.get('zone', '')
+    region          = request.GET.get('region', '')
+    cluster         = request.GET.get('cluster', '')
+    sub_cluster     = request.GET.get('sub_cluster', '')
+    existing_client = request.GET.get('existing_client', '')
 
     qs = SAHIDemand.objects.all()
-    if cluster:     qs = qs.filter(cluster=cluster)
-    if sub_cluster: qs = qs.filter(sub_cluster=sub_cluster)
+    if zone:            qs = qs.filter(zone=zone)
+    if region:          qs = qs.filter(region=region)
+    if cluster:         qs = qs.filter(cluster=cluster)
+    if sub_cluster:     qs = qs.filter(sub_cluster=sub_cluster)
+    if existing_client: qs = qs.filter(existing_client=existing_client)
 
     rows = list(qs.values(
-        'region', 'existing_potential', 'demand_city', 'cluster', 'sub_cluster',
+        'region', 'zone', 'existing_potential', 'demand_city', 'cluster', 'sub_cluster',
         'location', 'existing_client', 'client_nature',
         'designation', 'hc', 'monthly_demand'
     ).order_by('existing_client', 'designation'))
 
+    # Count unique sub-clusters by zone field (Production / Technology & Services)
+    prod_sub_clusters = len(set(
+        r['sub_cluster'] for r in rows
+        if r['sub_cluster'] and (r['zone'] or '').strip().lower() == 'production'
+    ))
+    tech_sub_clusters = len(set(
+        r['sub_cluster'] for r in rows
+        if r['sub_cluster'] and (r['zone'] or '').strip().lower() == 'technology & services'
+    ))
+
     totals = {
-        'rows':           len(rows),
-        'clients':        len(set(r['existing_client'] for r in rows if r['existing_client'])),
-        'total_hc':       sum((r['hc'] or 0) for r in rows),
-        'monthly_demand': sum((r['monthly_demand'] or 0) for r in rows),
+        'rows':              len(rows),
+        'clients':           len(set(r['existing_client'] for r in rows if r['existing_client'])),
+        'total_hc':          sum((r['hc'] or 0) for r in rows),
+        'monthly_demand':    sum((r['monthly_demand'] or 0) for r in rows),
+        'prod_sub_clusters': prod_sub_clusters,
+        'tech_sub_clusters': tech_sub_clusters,
     }
     return JsonResponse({'rows': rows, 'totals': totals})
 
@@ -1104,9 +1199,21 @@ def sahi_diploma_table_api(request):
             'message': f'No centres found for {scope}.',
         })
 
-    CATEGORIES = ['Diploma Colleges', 'Diploma College', 'Institutes & Training Centres']
+    # Categories belonging to "Diploma Colleges & Institutes & Training Centres".
+    # Source data uses inconsistent casing (e.g. 'Diploma college' vs 'Diploma
+    # College'), so we match case-insensitively and broaden to also cover ITI
+    # ("Institutes") and DDU-GKY ("Training Centres"), matching the section
+    # title shown on the SAHI page.
+    from django.db.models import Q
+    cat_filter = (
+        Q(category__iexact='Diploma college') |
+        Q(category__iexact='Diploma colleges') |
+        Q(category__iexact='ITI') |
+        Q(category__iexact='DDU-GKY centres') |
+        Q(category__icontains='Institutes & Training')
+    )
     qs = (CommunityCollege.objects
-          .filter(centre__centre_id__in=centre_ids, category__in=CATEGORIES)
+          .filter(cat_filter, centre__centre_id__in=centre_ids)
           .order_by('category', 'centre__centre_name', 'name_place'))
 
     rows = []
@@ -1119,16 +1226,410 @@ def sahi_diploma_table_api(request):
             'centre_name': cc.centre.centre_name if cc.centre else '',
         })
 
+    cl = lambda r: r['category'].lower()
     totals = {
-        'rows':    len(rows),
-        'centres': len(set(r['centre_name'] for r in rows if r['centre_name'])),
-        'diploma': sum(1 for r in rows if 'diploma' in r['category'].lower()),
-        'institutes': sum(1 for r in rows if 'institute' in r['category'].lower()),
+        'rows':            len(rows),
+        'centres':         len(set(r['centre_name'] for r in rows if r['centre_name'])),
+        'diploma':         sum(1 for r in rows if 'diploma'   in cl(r)),
+        'institutes':      sum(1 for r in rows if cl(r) == 'iti' or 'institute' in cl(r)),
+        'training_centres':sum(1 for r in rows if 'training'  in cl(r) or 'ddu-gky' in cl(r)),
     }
     return JsonResponse({
         'rows': rows, 'totals': totals,
         'mapped': True,
         'scope': sub_cluster or cluster,
+    })
+
+
+# ── SAHI APIs: Supply Chain (Associate + ITI/Polytechnic) ──────────────────
+
+def _sahi_sub_cluster_ids_for_filter(cluster, sub_cluster, zone='', region=''):
+    """
+    Resolve the user's Zone / Region / Cluster / Sub Cluster filter on the SAHI
+    page to the set of Sub Cluster IDs that join the SAHI Demand → Associate Data tables.
+    """
+    qs = SAHIDemand.objects.exclude(sub_cluster_id='')
+    if zone:        qs = qs.filter(zone=zone)
+    if region:      qs = qs.filter(region=region)
+    if cluster:     qs = qs.filter(cluster=cluster)
+    if sub_cluster: qs = qs.filter(sub_cluster=sub_cluster)
+    ids = set(qs.values_list('sub_cluster_id', flat=True))
+
+    # Fallback: ClusterMaster (covers sub_clusters not present in SAHIDemand)
+    if not ids and (cluster or sub_cluster):
+        cm = ClusterMaster.objects.exclude(sub_cluster_id='')
+        if cluster:     cm = cm.filter(cluster=cluster)
+        if sub_cluster: cm = cm.filter(sub_cluster=sub_cluster)
+        ids = set(cm.values_list('sub_cluster_id', flat=True))
+
+    return ids
+
+
+def sahi_qp_batch_api(request):
+    """
+    Table — QP ↔ BatchPlan match for the current SAHI demand scope.
+
+    Logic:
+      1. Pull SAHIDemand rows for the active filters → collect unique Designations.
+      2. Resolve Designations → QPs via DesignationQPMap.
+      3. Find ALL BatchPlan rows nationally whose qp is in that QP set.
+      4. Aggregate by Centre Name + QP + Cluster + Sub Cluster →
+         sum(final_enrolment_planned, final_certification_planned,
+             final_placement_planned).
+    """
+    zone            = request.GET.get('zone', '')
+    region          = request.GET.get('region', '')
+    cluster         = request.GET.get('cluster', '')
+    sub_cluster     = request.GET.get('sub_cluster', '')
+    existing_client = request.GET.get('existing_client', '')
+
+    # Step 1 — demand rows for current filter
+    demand_qs = SAHIDemand.objects.all()
+    if zone:            demand_qs = demand_qs.filter(zone=zone)
+    if region:          demand_qs = demand_qs.filter(region=region)
+    if cluster:         demand_qs = demand_qs.filter(cluster=cluster)
+    if sub_cluster:     demand_qs = demand_qs.filter(sub_cluster=sub_cluster)
+    if existing_client: demand_qs = demand_qs.filter(existing_client=existing_client)
+
+    designations = set(
+        demand_qs.exclude(designation='')
+                 .values_list('designation', flat=True)
+                 .distinct()
+    )
+
+    if not designations:
+        return JsonResponse({
+            'rows': [], 'totals': {'rows': 0, 'enrol': 0, 'cert': 0, 'place': 0},
+            'mapped_designations': 0, 'qp_count': 0,
+            'message': 'No designations found for the current filter.',
+        })
+
+    # Step 2 — designations → QPs
+    qp_set = set(
+        DesignationQPMap.objects
+        .filter(designation__in=designations)
+        .values_list('qp', flat=True)
+    )
+
+    unmapped = designations - set(
+        DesignationQPMap.objects
+        .filter(designation__in=designations)
+        .values_list('designation', flat=True)
+    )
+
+    if not qp_set:
+        return JsonResponse({
+            'rows': [], 'totals': {'rows': 0, 'enrol': 0, 'cert': 0, 'place': 0},
+            'mapped_designations': 0, 'qp_count': 0,
+            'unmapped': sorted(unmapped),
+            'message': 'No QP mappings found for the designations in scope.',
+        })
+
+    # Step 3+4 — BatchPlan nationally, aggregate
+    from django.db.models import Sum
+    bp_rows = (
+        BatchPlan.objects
+        .filter(qp__in=qp_set)
+        .values('centre_name', 'qp', 'centre__cluster', 'centre__sub_cluster')
+        .annotate(
+            enrol=Sum('final_enrolment_planned'),
+            cert =Sum('final_certification_planned'),
+            place=Sum('final_placement_planned'),
+        )
+        .order_by('centre__cluster', 'centre__sub_cluster', 'centre_name', 'qp')
+    )
+
+    rows = [{
+        'centre_name': r['centre_name']          or '—',
+        'qp':          r['qp']                   or '—',
+        'cluster':     r['centre__cluster']      or '—',
+        'sub_cluster': r['centre__sub_cluster']  or '—',
+        'enrol':       r['enrol']  or 0,
+        'cert':        r['cert']   or 0,
+        'place':       r['place']  or 0,
+    } for r in bp_rows]
+
+    totals = {
+        'rows':  len(rows),
+        'enrol': sum(r['enrol']  for r in rows),
+        'cert':  sum(r['cert']   for r in rows),
+        'place': sum(r['place']  for r in rows),
+    }
+
+    return JsonResponse({
+        'rows':               rows,
+        'totals':             totals,
+        'mapped_designations': len(designations) - len(unmapped),
+        'total_designations':  len(designations),
+        'qp_count':           len(qp_set),
+        'unmapped':           sorted(unmapped),
+    })
+
+
+def _emp_sub_cluster_state(emp_sub_cluster):
+    """
+    Given an Employability Sub Cluster name, return the physical State of the
+    Centre(s) in that sub-cluster (from Center Master). Used to filter associates
+    by their home Supply State = the sub-cluster's own state.
+    """
+    if not emp_sub_cluster:
+        return ''
+    states = (
+        Centre.objects
+        .filter(sub_cluster=emp_sub_cluster)
+        .exclude(state='').exclude(state=None)
+        .values_list('state', flat=True)
+        .distinct()
+    )
+    states = list(states)
+    return states[0] if states else ''
+
+
+def sahi_worksetu_filter_options_api(request):
+    """
+    Returns two lists for the WorkSetu filter section:
+      - emp_sub_clusters:     Sub Clusters that exist in BOTH Associate Data AND
+                              Center Master (matched by Sub Cluster ID). Always the
+                              full overlap list — NOT narrowed by SAHI filters.
+      - worksetu_sub_clusters: WorkSetu Sub Clusters reachable from the in-scope
+                              associates' supply PINs. Scope =
+                                · the active SAHI filter (zone/region/cluster/sub_cluster)
+                                  via the SAHI sub-cluster's own associates, AND/OR
+                                · the selected Employability Sub Cluster (by its state).
+    """
+    zone            = request.GET.get('zone', '')
+    region          = request.GET.get('region', '')
+    cluster         = request.GET.get('cluster', '')
+    sub_cluster     = request.GET.get('sub_cluster', '')
+    existing_client = request.GET.get('existing_client', '')
+    emp_sub_cluster = request.GET.get('emp_sub_cluster', '')
+
+    # 1. Employability Sub Clusters = Associate Data ∩ Center Master (by Sub Cluster ID)
+    assoc_scids = set(
+        AssociateData.objects.exclude(sub_cluster_id='').exclude(sub_cluster_id=None)
+                     .values_list('sub_cluster_id', flat=True)
+    )
+    centre_scids = set(
+        Centre.objects.exclude(sub_cluster_id='').exclude(sub_cluster_id=None)
+                     .values_list('sub_cluster_id', flat=True)
+    )
+    matched_scids = assoc_scids & centre_scids
+
+    # Resolve those IDs → sub-cluster names (use Associate Data as the label source)
+    emp_sub_clusters = sorted(set(
+        AssociateData.objects
+        .filter(sub_cluster_id__in=matched_scids)
+        .exclude(sub_cluster='').exclude(sub_cluster=None)
+        .values_list('sub_cluster', flat=True)
+    ))
+
+    # 2. WorkSetu Sub Clusters — derived from in-scope associates' supply PINs.
+    assoc_ws = AssociateData.objects.all()
+
+    # (a) Scope to the active SAHI filter via the SAHI sub-cluster's OWN associates
+    has_sahi_filter = bool(zone or region or cluster or sub_cluster)
+    if has_sahi_filter:
+        scid_set = _sahi_sub_cluster_ids_for_filter(cluster, sub_cluster, zone=zone, region=region)
+        if scid_set:
+            assoc_ws = assoc_ws.filter(sub_cluster_id__in=scid_set)
+        else:
+            assoc_ws = assoc_ws.none()
+        if existing_client:
+            assoc_ws = assoc_ws.filter(client=existing_client)
+
+    # (b) If an Employability Sub Cluster is chosen, narrow by its state
+    if emp_sub_cluster:
+        emp_state = _emp_sub_cluster_state(emp_sub_cluster)
+        assoc_ws = assoc_ws.filter(supply_state=emp_state) if emp_state else assoc_ws.none()
+
+    supply_pins = set(
+        assoc_ws.exclude(supply_pin='').values_list('supply_pin', flat=True).distinct()
+    )
+    worksetu_sub_clusters = sorted(set(
+        WorkSetuPINMap.objects
+        .filter(supply_pin__in=supply_pins)
+        .values_list('worksetu_sub_cluster', flat=True)
+    ))
+
+    return JsonResponse({
+        'emp_sub_clusters':      emp_sub_clusters,
+        'worksetu_sub_clusters': worksetu_sub_clusters,
+    })
+
+
+def sahi_supply_summary_api(request):
+    """
+    Table 4 — Supply Summary.
+    For the user-selected SAHI Zone / Region / Cluster / Sub Cluster:
+      1. Resolve the matching Sub Cluster IDs (via SAHI_Demand_Master).
+      2. Pull Associate rows whose Sub Cluster ID is in that set.
+      3. Aggregate Supply State × Supply District × Client × Gender → count.
+    """
+    zone               = request.GET.get('zone', '')
+    region             = request.GET.get('region', '')
+    cluster            = request.GET.get('cluster', '')
+    sub_cluster        = request.GET.get('sub_cluster', '')
+    existing_client    = request.GET.get('existing_client', '')
+    emp_sub_cluster    = request.GET.get('emp_sub_cluster', '')
+    worksetu_sc        = request.GET.get('worksetu_sub_cluster', '')
+
+    has_sahi_filter = bool(zone or region or cluster or sub_cluster)
+    has_ws_filter   = bool(emp_sub_cluster or worksetu_sc or existing_client)
+
+    if not has_sahi_filter and not has_ws_filter:
+        return JsonResponse({
+            'rows': [], 'totals': {'rows': 0, 'associates': 0},
+            'mapped': False,
+            'message': 'Select a filter to view the supply summary.',
+        })
+
+    assoc_qs = AssociateData.objects.all()
+
+    # Scope by SAHI demand filters (only when a SAHI filter is active)
+    if has_sahi_filter:
+        scid_set = _sahi_sub_cluster_ids_for_filter(cluster, sub_cluster, zone=zone, region=region)
+        if not scid_set:
+            scope = sub_cluster or cluster or region or zone
+            return JsonResponse({
+                'rows': [], 'totals': {'rows': 0, 'associates': 0},
+                'mapped': True,
+                'scope': scope,
+                'message': 'No Sub Cluster IDs found for the selected filter.',
+            })
+        assoc_qs = assoc_qs.filter(sub_cluster_id__in=scid_set)
+
+    from django.db.models import Count
+    if existing_client:
+        assoc_qs = assoc_qs.filter(client=existing_client)
+    if emp_sub_cluster:
+        # Filter by associates whose HOME Supply State = the sub-cluster's own state
+        emp_state = _emp_sub_cluster_state(emp_sub_cluster)
+        assoc_qs = assoc_qs.filter(supply_state=emp_state) if emp_state else assoc_qs.none()
+    if worksetu_sc:
+        # Resolve WorkSetu sub cluster → supply PINs → filter associates
+        ws_pins = set(
+            WorkSetuPINMap.objects
+            .filter(worksetu_sub_cluster=worksetu_sc)
+            .values_list('supply_pin', flat=True)
+        )
+        assoc_qs = assoc_qs.filter(supply_pin__in=ws_pins)
+    grouped = (
+        assoc_qs
+        .values('supply_state', 'supply_district', 'client', 'gender')
+        .annotate(count=Count('id'))
+        .order_by('supply_state', 'supply_district', 'client', 'gender')
+    )
+
+    rows = [{
+        'supply_state':    r['supply_state']    or '—',
+        'supply_district': r['supply_district'] or '—',
+        'client':          r['client']          or '—',
+        'gender':          r['gender']          or '—',
+        'count':           r['count'],
+    } for r in grouped]
+
+    totals = {
+        'rows':       len(rows),
+        'associates': sum(r['count'] for r in rows),
+        'states':     len({r['supply_state']    for r in rows if r['supply_state']    != '—'}),
+        'districts':  len({r['supply_district'] for r in rows if r['supply_district'] != '—'}),
+        'clients':    len({r['client']          for r in rows if r['client']          != '—'}),
+    }
+    return JsonResponse({
+        'rows':   rows,
+        'totals': totals,
+        'mapped': True,
+        'scope':  worksetu_sc or emp_sub_cluster or sub_cluster or cluster or existing_client or 'All Associates',
+    })
+
+
+def sahi_iti_polytechnic_api(request):
+    """
+    Table 5 — ITI / Polytechnic Colleges (Supply chain by Pin Code).
+    Flow:
+      zone / region / cluster / sub_cluster
+        → Sub Cluster IDs (via SAHI_Demand_Master)
+        → Associate rows → distinct Supply PINs
+        → ITIPolytechnicByPIN rows whose Supply PIN is in that set.
+    Columns: Institution Name | Type | Address / Location.
+    """
+    zone               = request.GET.get('zone', '')
+    region             = request.GET.get('region', '')
+    cluster            = request.GET.get('cluster', '')
+    sub_cluster        = request.GET.get('sub_cluster', '')
+    existing_client    = request.GET.get('existing_client', '')
+    emp_sub_cluster    = request.GET.get('emp_sub_cluster', '')
+    worksetu_sc        = request.GET.get('worksetu_sub_cluster', '')
+
+    has_sahi_filter = bool(zone or region or cluster or sub_cluster)
+    has_ws_filter   = bool(emp_sub_cluster or worksetu_sc or existing_client)
+
+    if not has_sahi_filter and not has_ws_filter:
+        return JsonResponse({
+            'rows': [], 'totals': {'rows': 0, 'pins': 0},
+            'mapped': False,
+            'message': 'Select a filter to view ITI / Polytechnic colleges.',
+        })
+
+    assoc_pin_qs = AssociateData.objects.exclude(supply_pin='')
+
+    if has_sahi_filter:
+        scid_set = _sahi_sub_cluster_ids_for_filter(cluster, sub_cluster, zone=zone, region=region)
+        if not scid_set:
+            return JsonResponse({
+                'rows': [], 'totals': {'rows': 0, 'pins': 0},
+                'mapped': True,
+                'scope': sub_cluster or cluster or region or zone,
+                'message': 'No matching Sub Cluster IDs.',
+            })
+        assoc_pin_qs = assoc_pin_qs.filter(sub_cluster_id__in=scid_set)
+
+    if existing_client:
+        assoc_pin_qs = assoc_pin_qs.filter(client=existing_client)
+    if emp_sub_cluster:
+        emp_state = _emp_sub_cluster_state(emp_sub_cluster)
+        assoc_pin_qs = assoc_pin_qs.filter(supply_state=emp_state) if emp_state else assoc_pin_qs.none()
+    if worksetu_sc:
+        ws_pins = set(
+            WorkSetuPINMap.objects
+            .filter(worksetu_sub_cluster=worksetu_sc)
+            .values_list('supply_pin', flat=True)
+        )
+        assoc_pin_qs = assoc_pin_qs.filter(supply_pin__in=ws_pins)
+    pin_set = set(assoc_pin_qs.values_list('supply_pin', flat=True).distinct())
+
+    if not pin_set:
+        return JsonResponse({
+            'rows': [], 'totals': {'rows': 0, 'pins': 0},
+            'mapped': True,
+            'scope': worksetu_sc or emp_sub_cluster or sub_cluster or cluster or 'All Associates',
+            'message': 'No associates (and hence no Supply PINs) in this scope.',
+        })
+
+    qs = (ITIPolytechnicByPIN.objects
+          .filter(supply_pin__in=pin_set)
+          .order_by('institution_type', 'supply_pin', 'institution_name'))
+
+    rows = [{
+        'institution_name': r.institution_name,
+        'institution_type': r.institution_type,
+        'address_location': r.address_location,
+        'supply_pin':       r.supply_pin,
+        'distance_km':      r.distance_km,
+    } for r in qs]
+
+    totals = {
+        'rows':         len(rows),
+        'pins':         len({r['supply_pin'] for r in rows}),
+        'iti':          sum(1 for r in rows if r['institution_type'].lower() == 'iti'),
+        'polytechnic':  sum(1 for r in rows if r['institution_type'].lower() == 'polytechnic'),
+    }
+    return JsonResponse({
+        'rows':   rows,
+        'totals': totals,
+        'mapped': True,
+        'scope':  sub_cluster or cluster,
+        'pins_in_scope': len(pin_set),
     })
 
 
@@ -1219,6 +1720,121 @@ def community_college_categories_api(request):
     categories = sorted(set(cat_qs.exclude(category='').values_list('category', flat=True)))
     sources    = sorted(set(qs.exclude(source='').values_list('source', flat=True)))
     return JsonResponse({'categories': categories, 'sources': sources})
+
+
+# ── API: Sourcing Summary ─────────────────────────────────────────────────────
+#
+# Returns the full Community Source → Community Category tree (from
+# SourcingChannelMaster) annotated with candidate counts and an Active flag
+# from SourcingActual.
+#
+# Active rules (confirmed):
+#   • Category is Active  iff ≥ 1 candidate row matches (source, category)
+#                              in the current centre scope.
+#   • Source   is Active  iff at least one of its categories is Active.
+#
+# Centre filter:
+#   When centre_id is provided, both counts and Active flags are recomputed
+#   over the actuals for that centre only. With no centre_id we show totals
+#   across the full dataset.
+#
+# Canonical display order for the 6 sources (matches the mock screenshot).
+SOURCING_SOURCE_ORDER = [
+    'Community Mobilisation',
+    'Training & Education Institutions',
+    'Government Ecosystem',
+    'Referral-Based Sourcing',
+    'Digital / WhatsApp Campaigns',
+    'Employer-Linked Sourcing',
+]
+
+
+def sourcing_summary_api(request):
+    centre_id = request.GET.get('centre_id', '').strip()
+
+    # 1. Master taxonomy: every Source → its full list of Categories.
+    #    This is what we always *show*, even when actuals are zero.
+    master_rows = SourcingChannelMaster.objects.all().values_list(
+        'community_source', 'community_category'
+    )
+    source_to_categories = defaultdict(list)
+    for src, cat in master_rows:
+        src = (src or '').strip()
+        cat = (cat or '').strip()
+        if not src or not cat:
+            continue
+        if cat not in source_to_categories[src]:
+            source_to_categories[src].append(cat)
+
+    # 2. Actual counts, scoped by centre if requested.
+    actual_qs = SourcingActual.objects.all()
+    if centre_id:
+        # Match either via the FK or via the raw centre id string — actuals
+        # rows whose centre_id wasn't in Centre master still have centre_id_raw.
+        actual_qs = actual_qs.filter(centre_id_raw=centre_id)
+
+    # (source, category) → count
+    actual_counts = defaultdict(int)
+    for src, cat in actual_qs.values_list('community_source', 'community_category'):
+        src = (src or '').strip()
+        cat = (cat or '').strip()
+        if src and cat:
+            actual_counts[(src, cat)] += 1
+
+    # 3. Assemble the response. Preserve the canonical source order, then
+    #    append any sources that exist in master but aren't in our order list
+    #    (defensive — keeps the API correct if new sources are added later).
+    known = [s for s in SOURCING_SOURCE_ORDER if s in source_to_categories]
+    extras = [s for s in source_to_categories.keys() if s not in SOURCING_SOURCE_ORDER]
+    ordered_sources = known + sorted(extras)
+
+    sources_out = []
+    grand_total_leads      = 0
+    grand_total_categories = 0
+    active_sources_count   = 0
+
+    for src in ordered_sources:
+        categories = source_to_categories[src]
+        cat_rows = []
+        src_total = 0
+        active_cats = 0
+        for cat in categories:
+            cnt = actual_counts.get((src, cat), 0)
+            is_active = cnt > 0
+            if is_active:
+                active_cats += 1
+            src_total += cnt
+            cat_rows.append({
+                'category': cat,
+                'count':    cnt,
+                'active':   is_active,
+            })
+
+        src_active = active_cats > 0
+        if src_active:
+            active_sources_count += 1
+        grand_total_leads      += src_total
+        grand_total_categories += len(categories)
+
+        sources_out.append({
+            'source':           src,
+            'count':            src_total,
+            'active':           src_active,
+            'category_total':   len(categories),
+            'category_active':  active_cats,
+            'categories':       cat_rows,
+        })
+
+    return JsonResponse({
+        'centre_id': centre_id,
+        'sources':   sources_out,
+        'totals': {
+            'sources':           len(sources_out),
+            'active_sources':    active_sources_count,
+            'categories':        grand_total_categories,
+            'leads':             grand_total_leads,
+        },
+    })
 
 
 # ── API: Cert Schedule (SMB) ──────────────────────────────────────────────────
@@ -2147,7 +2763,13 @@ def index(request):
     for s in staff_list:
         role_summary[s.role] += 1
 
-    staff_status = build_staff_status(None, staff_qs)
+    # Productivity tables must respect the same centre scope as Manpower.
+    productivity_centre_ids = (
+        [centre_id_filter] if centre_id_filter else list(manpower_centre_ids)
+    )
+    staff_status = build_staff_status(
+        None, staff_qs, centre_ids=productivity_centre_ids
+    )
 
     # Staffing tab — filter option lists for dropdowns
     staffing_regions = sorted(set(
@@ -2331,7 +2953,7 @@ def centre_detail(request, centre_id):
     for s in staff:
         role_summary[s.role] += 1
 
-    staff_status = build_staff_status(None, staff)
+    staff_status = build_staff_status(None, staff, centre_ids=[centre.centre_id])
 
     batch_rows_json = json.dumps([
         {
@@ -2362,3 +2984,513 @@ def centre_detail(request, centre_id):
         'delay_total': total_row['total_delayed_count'],
         'staff_status': staff_status,
     })
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MIS SUMMARY — helper to build the shared dataset
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _mis_build_dataset(entity_filter=None, fy=None, cluster=None,
+                       sub_cluster=None, bu_head=None):
+    """
+    Returns (rows, today).
+    entity_filter: None = all, 'SF' = SF only, 'LLF' = LLF only
+    fy: None = all years, '2026-27' = restrict to that financial-year window
+    cluster / sub_cluster / bu_head: optional Centre-attribute filters
+    """
+    from datetime import date as _date
+    today = _date.today()
+
+    # Build QP-level NAPS/NATS alignment lookup from NapsEligible table
+    naps_aligned_qps = set(
+        NapsEligible.objects.filter(naps_aligned__iexact='Yes')
+        .values_list('qp', flat=True)
+    )
+    nats_aligned_qps = set(
+        NapsEligible.objects.filter(nats_aligned__iexact='Yes')
+        .values_list('qp', flat=True)
+    )
+
+    qs = BatchPlan.objects.select_related('centre')
+    if entity_filter in ('SF', 'LLF'):
+        qs = qs.filter(entity=entity_filter)
+    if fy:
+        qs = filter_batchplan_by_fy(qs, fy)
+    # Centre-attribute filters
+    if cluster:
+        qs = qs.filter(centre__cluster=cluster)
+    if sub_cluster:
+        qs = qs.filter(centre__sub_cluster=sub_cluster)
+    if bu_head:
+        qs = qs.filter(centre__bu_head=bu_head)
+
+    qs = qs.values(
+        'batch_id', 'centre_id', 'centre_name', 'qp', 'entity',
+        'batch_planned_start_date',
+        'certification_planned_start_date',
+        'placement_planned_end_date',
+        'batch_actual_start_date',
+        'assessment_actual_certification_date',
+        'placed_date',
+        'final_enrolment_planned',
+        'final_certification_planned',
+        'final_placement_planned',
+        'fy_e_act', 'fy_c_act', 'fy_p_act',
+        'fy_naps_act', 'fy_nats_act',
+        'centre__tm_name',
+    )
+
+    rows = list(qs)
+    for r in rows:
+        r['tm_name'] = (r['centre__tm_name'] or 'Unassigned').strip()
+        bps = r['batch_planned_start_date']
+        cps = r['certification_planned_start_date']
+        ppe = r['placement_planned_end_date']
+        bas = r['batch_actual_start_date']
+        acd = r['assessment_actual_certification_date']
+        pd_ = r['placed_date']
+        r['e_delayed'] = bool(bps and bps <= today and not bas)
+        r['c_delayed'] = bool(cps and cps <= today and not acd)
+        r['p_delayed'] = bool(ppe and ppe <= today and not pd_)
+        r['ytd_e'] = bool(bps and bps <= today)
+        r['ytd_c'] = bool(cps and cps <= today)
+        r['ytd_p'] = bool(ppe and ppe <= today)
+        # NAPS / NATS alignment — mapped from QP name
+        r['naps_qp'] = r['qp'] in naps_aligned_qps
+        r['nats_qp'] = r['qp'] in nats_aligned_qps
+    return rows, today
+
+
+def _agg_rows(rows):
+    a = dict(final_e=0, final_c=0, final_p=0,
+             final_naps=0, final_nats=0,
+             ytd_e_plan=0, ytd_c_plan=0, ytd_p_plan=0,
+             ytd_naps_plan=0, ytd_nats_plan=0,
+             fy_e_act=0, fy_c_act=0, fy_p_act=0,
+             fy_naps_cert=0, fy_nats_cert=0,   # of Cert actuals: NAPS / NATS eligible
+             fy_naps_act=0, fy_nats_act=0,     # FY 26-27 NAPS/NATS Act (from batch plan)
+             e_del=0, c_del=0, p_del=0)
+    for r in rows:
+        fe = r['final_enrolment_planned'] or 0
+        fc = r['final_certification_planned'] or 0
+        fp = r['final_placement_planned'] or 0
+        a['final_e'] += fe; a['final_c'] += fc; a['final_p'] += fp
+        # NAPS / NATS aligned — full-year targets (enrolment-based)
+        if r['naps_qp']: a['final_naps'] += fe
+        if r['nats_qp']: a['final_nats'] += fe
+        # YTD planned
+        if r['ytd_e']: a['ytd_e_plan'] += fe
+        if r['ytd_c']: a['ytd_c_plan'] += fc
+        if r['ytd_p']: a['ytd_p_plan'] += fp
+        # YTD NAPS / NATS aligned targets
+        if r['ytd_e'] and r['naps_qp']: a['ytd_naps_plan'] += fe
+        if r['ytd_e'] and r['nats_qp']: a['ytd_nats_plan'] += fe
+        # Actuals
+        ca = r['fy_c_act'] or 0
+        a['fy_e_act'] += r['fy_e_act'] or 0
+        a['fy_c_act'] += ca
+        a['fy_p_act'] += r['fy_p_act'] or 0
+        # Of the Cert actuals — how many fall under NAPS / NATS aligned QPs
+        if r['naps_qp']: a['fy_naps_cert'] += ca
+        if r['nats_qp']: a['fy_nats_cert'] += ca
+        # FY 26-27 NAPS / NATS Act — straight from the batch plan columns
+        a['fy_naps_act'] += r['fy_naps_act'] or 0
+        a['fy_nats_act'] += r['fy_nats_act'] or 0
+        if r['e_delayed']: a['e_del'] += 1
+        if r['c_delayed']: a['c_del'] += 1
+        if r['p_delayed']: a['p_del'] += 1
+    return a
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MIS SUMMARY — cascading filter options (Entity → BU Head → Cluster → Sub Cluster)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _mis_filter_options(entity=None, bu_head=None, cluster=None, sub_cluster=None):
+    """
+    Returns (bu_heads, clusters, sub_clusters) scoped by the active selections.
+    Cascade rules:
+      • Entity scopes everything (only centres that have batch plans for that entity)
+      • BU Head narrows Cluster + Sub Cluster
+      • Cluster narrows Sub Cluster
+    """
+    bp = BatchPlan.objects.all()
+    if entity in ('SF', 'LLF'):
+        bp = bp.filter(entity=entity)
+    scope_ids = set(bp.values_list('centre_id', flat=True))
+    base = Centre.objects.filter(centre_id__in=scope_ids)
+
+    # BU heads — scoped by entity only
+    bu_heads = sorted(
+        x for x in base.values_list('bu_head', flat=True).distinct() if x
+    )
+
+    # Clusters — scoped by entity + bu_head
+    cqs = base
+    if bu_head:
+        cqs = cqs.filter(bu_head=bu_head)
+    clusters = sorted(
+        x for x in cqs.values_list('cluster', flat=True).distinct() if x
+    )
+
+    # Sub clusters — scoped by entity + bu_head + cluster
+    sqs = cqs
+    if cluster:
+        sqs = sqs.filter(cluster=cluster)
+    sub_clusters = sorted(
+        x for x in sqs.values_list('sub_cluster', flat=True).distinct() if x
+    )
+
+    return bu_heads, clusters, sub_clusters
+
+
+def mis_filter_options_api(request):
+    """Live cascade endpoint for the MIS Summary filter bar."""
+    entity = request.GET.get('entity', '').upper()
+    if entity not in ('SF', 'LLF'):
+        entity = ''
+    bu_head     = request.GET.get('bu_head', '')
+    cluster     = request.GET.get('cluster', '')
+    sub_cluster = request.GET.get('sub_cluster', '')
+    bu_heads, clusters, sub_clusters = _mis_filter_options(
+        entity or None, bu_head or None, cluster or None, sub_cluster or None)
+    return JsonResponse({
+        'bu_heads': bu_heads,
+        'clusters': clusters,
+        'sub_clusters': sub_clusters,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MIS SUMMARY — page view
+# ─────────────────────────────────────────────────────────────────────────────
+
+def mis_summary_view(request):
+    entity = request.GET.get('entity', '').upper()
+    if entity not in ('SF', 'LLF'):
+        entity = ''
+
+    available_fys = get_available_fys()
+    fy = request.GET.get('fy', available_fys[0] if available_fys else '2026-27')
+
+    bu_head     = request.GET.get('bu_head', '')
+    cluster     = request.GET.get('cluster', '')
+    sub_cluster = request.GET.get('sub_cluster', '')
+
+    rows, today = _mis_build_dataset(
+        entity_filter=entity or None, fy=fy,
+        cluster=cluster or None, sub_cluster=sub_cluster or None,
+        bu_head=bu_head or None,
+    )
+
+    # Dropdown option lists (scoped to current selections)
+    bu_heads, clusters, sub_clusters = _mis_filter_options(
+        entity or None, bu_head or None, cluster or None, sub_cluster or None)
+
+    from collections import defaultdict
+    tm_rows = defaultdict(list)
+    for r in rows:
+        tm_rows[r['tm_name']].append(r)
+
+    tms_sorted = sorted(tm_rows.keys())
+    table = []
+    totals = dict(final_e=0, final_c=0, final_p=0,
+                  final_naps=0, final_nats=0,
+                  ytd_e_plan=0, ytd_c_plan=0, ytd_p_plan=0,
+                  ytd_naps_plan=0, ytd_nats_plan=0,
+                  fy_e_act=0, fy_c_act=0, fy_p_act=0,
+                  fy_naps_cert=0, fy_nats_cert=0,
+                  fy_naps_act=0, fy_nats_act=0,
+                  e_del=0, c_del=0, p_del=0)
+
+    for tm in tms_sorted:
+        a = _agg_rows(tm_rows[tm])
+        table.append({'tm': tm, **a})
+        for k in totals:
+            totals[k] += a[k]
+
+    table.append({'tm': 'Grand Total', **totals})
+
+    return render(request, 'dashboard/mis_summary.html', {
+        'table': table,
+        'today': today,
+        'entity': entity,
+        'fy': fy,
+        'available_fys': available_fys,
+        'bu_head': bu_head,
+        'cluster': cluster,
+        'sub_cluster': sub_cluster,
+        'bu_heads': bu_heads,
+        'clusters': clusters,
+        'sub_clusters': sub_clusters,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MIS SUMMARY — drill-down API
+# ─────────────────────────────────────────────────────────────────────────────
+
+def mis_drilldown_api(request):
+    from collections import defaultdict
+    level      = request.GET.get('level', 'centre')
+    tm         = request.GET.get('tm', '')
+    centre_id  = request.GET.get('centre_id', '')
+    qp         = request.GET.get('qp', '')
+    delay_type = request.GET.get('delay_type', 'e')
+    entity     = request.GET.get('entity', '').upper()
+    if entity not in ('SF', 'LLF'):
+        entity = None
+    fy         = request.GET.get('fy', '') or None
+    cluster     = request.GET.get('cluster', '') or None
+    sub_cluster = request.GET.get('sub_cluster', '') or None
+    bu_head     = request.GET.get('bu_head', '') or None
+
+    rows, today = _mis_build_dataset(entity_filter=entity, fy=fy,
+                                     cluster=cluster, sub_cluster=sub_cluster,
+                                     bu_head=bu_head)
+    rows = [r for r in rows if r['tm_name'] == tm]
+
+    def fmt_date(d):
+        return d.strftime('%d %b %Y') if d else '—'
+
+    if level == 'centre':
+        by_centre = defaultdict(list)
+        for r in rows:
+            by_centre[(r['centre_id'], r['centre_name'])].append(r)
+        data = []
+        for (cid, cname), crow in sorted(by_centre.items(), key=lambda x: x[0][1]):
+            a = _agg_rows(crow)
+            data.append({'centre_id': cid, 'centre_name': cname, **a})
+        return JsonResponse({'level': 'centre', 'tm': tm, 'rows': data})
+
+    elif level == 'qp':
+        rows = [r for r in rows if r['centre_id'] == centre_id]
+        by_qp = defaultdict(list)
+        for r in rows:
+            by_qp[r['qp']].append(r)
+        data = []
+        for qp_name, qrows in sorted(by_qp.items()):
+            a = _agg_rows(qrows)
+            data.append({'qp': qp_name, **a})
+        return JsonResponse({'level': 'qp', 'tm': tm, 'centre_id': centre_id, 'rows': data})
+
+    elif level == 'batch':
+        from datetime import date as _date
+        rows = [r for r in rows if r['centre_id'] == centre_id and r['qp'] == qp]
+        data = []
+        for r in sorted(rows, key=lambda x: x['batch_planned_start_date'] or _date(2099,1,1)):
+            data.append({
+                'batch_id': r['batch_id'],
+                'entity':   r['entity'],
+                'final_e': r['final_enrolment_planned'] or 0,
+                'final_c': r['final_certification_planned'] or 0,
+                'final_p': r['final_placement_planned'] or 0,
+                'fy_e_act': r['fy_e_act'] or 0,
+                'fy_c_act': r['fy_c_act'] or 0,
+                'fy_p_act': r['fy_p_act'] or 0,
+                # Of this batch's cert actual: NAPS / NATS eligible
+                'fy_naps_cert': (r['fy_c_act'] or 0) if r['naps_qp'] else 0,
+                'fy_nats_cert': (r['fy_c_act'] or 0) if r['nats_qp'] else 0,
+                # FY 26-27 NAPS / NATS Act — straight from batch plan columns
+                'fy_naps_act': r['fy_naps_act'] or 0,
+                'fy_nats_act': r['fy_nats_act'] or 0,
+                'naps_qp': r['naps_qp'],
+                'nats_qp': r['nats_qp'],
+                'batch_start_planned': fmt_date(r['batch_planned_start_date']),
+                'cert_start_planned':  fmt_date(r['certification_planned_start_date']),
+                'place_end_planned':   fmt_date(r['placement_planned_end_date']),
+                'batch_start_actual':  fmt_date(r['batch_actual_start_date']),
+                'cert_actual':         fmt_date(r['assessment_actual_certification_date']),
+                'placed_date':         fmt_date(r['placed_date']),
+                'e_delayed': r['e_delayed'],
+                'c_delayed': r['c_delayed'],
+                'p_delayed': r['p_delayed'],
+            })
+        return JsonResponse({'level': 'batch', 'rows': data})
+
+    elif level == 'delayed_batches':
+        flag = f'{delay_type}_delayed'
+        delayed = [r for r in rows if r.get(flag)]
+        data = []
+        for r in sorted(delayed, key=lambda x: x['centre_name']):
+            data.append({
+                'batch_id':    r['batch_id'],
+                'centre_name': r['centre_name'],
+                'centre_id':   r['centre_id'],
+                'qp':          r['qp'],
+                'entity':      r['entity'],
+                'batch_start_planned': fmt_date(r['batch_planned_start_date']),
+                'cert_start_planned':  fmt_date(r['certification_planned_start_date']),
+                'place_end_planned':   fmt_date(r['placement_planned_end_date']),
+                'batch_start_actual':  fmt_date(r['batch_actual_start_date']),
+                'cert_actual':         fmt_date(r['assessment_actual_certification_date']),
+                'placed_date':         fmt_date(r['placed_date']),
+                'final_e': r['final_enrolment_planned'] or 0,
+                'final_c': r['final_certification_planned'] or 0,
+                'final_p': r['final_placement_planned'] or 0,
+            })
+        label = {'e': 'Enrolment', 'c': 'Certification', 'p': 'Placement'}.get(delay_type, '')
+        return JsonResponse({'level': 'delayed_batches', 'delay_type': label, 'tm': tm, 'rows': data})
+
+    return JsonResponse({'error': 'unknown level'}, status=400)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SALES PIPELINE — TM → Centre → Stage drill-down
+# ─────────────────────────────────────────────────────────────────────────────
+
+def sales_pipeline_api(request):
+    """
+    level=tm      → one row per TM: count of opps, sum exp positions
+    level=centre  → for a TM: one row per centre
+    level=stage   → for a TM (+optional centre): one row per stage
+    Always includes a 'grand_total'.
+    """
+    from collections import defaultdict
+    from dashboard.models import SalesPipeline
+
+    level     = request.GET.get('level', 'tm')
+    tm        = request.GET.get('tm', '')
+    centre_id = request.GET.get('centre_id', '')
+
+    qs = SalesPipeline.objects.select_related('centre').all()
+    rows = []
+    for r in qs.values('account_client', 'exp_positions', 'stage',
+                       'centre_id', 'centre_name', 'centre__tm_name'):
+        rows.append({
+            'tm':       (r['centre__tm_name'] or 'Unassigned').strip(),
+            'centre_id': r['centre_id'] or '',
+            'centre_name': r['centre_name'] or '',
+            'stage':     r['stage'] or 'Unspecified',
+            'positions': r['exp_positions'] or 0,
+        })
+
+    def agg(group_key):
+        buckets = defaultdict(lambda: {'count': 0, 'positions': 0})
+        for r in rows:
+            k = group_key(r)
+            buckets[k]['count'] += 1
+            buckets[k]['positions'] += r['positions']
+        return buckets
+
+    def grand(subset):
+        return {'count': len(subset), 'positions': sum(x['positions'] for x in subset)}
+
+    if level == 'tm':
+        b = agg(lambda r: r['tm'])
+        data = [{'tm': k, **v} for k, v in sorted(b.items())]
+        return JsonResponse({'level': 'tm', 'rows': data, 'grand_total': grand(rows)})
+
+    elif level == 'centre':
+        subset = [r for r in rows if r['tm'] == tm]
+        b = defaultdict(lambda: {'count': 0, 'positions': 0, 'centre_name': ''})
+        for r in subset:
+            key = (r['centre_id'], r['centre_name'])
+            b[key]['count'] += 1
+            b[key]['positions'] += r['positions']
+            b[key]['centre_name'] = r['centre_name']
+        data = [{'centre_id': k[0], 'centre_name': k[1], 'count': v['count'], 'positions': v['positions']}
+                for k, v in sorted(b.items(), key=lambda x: x[0][1])]
+        return JsonResponse({'level': 'centre', 'tm': tm, 'rows': data, 'grand_total': grand(subset)})
+
+    elif level == 'stage':
+        subset = [r for r in rows if r['tm'] == tm]
+        if centre_id:
+            subset = [r for r in subset if r['centre_id'] == centre_id]
+        b = agg_stage = defaultdict(lambda: {'count': 0, 'positions': 0})
+        for r in subset:
+            b[r['stage']]['count'] += 1
+            b[r['stage']]['positions'] += r['positions']
+        data = [{'stage': k, **v} for k, v in sorted(b.items())]
+        return JsonResponse({'level': 'stage', 'tm': tm, 'centre_id': centre_id,
+                             'rows': data, 'grand_total': grand(subset)})
+
+    return JsonResponse({'error': 'unknown level'}, status=400)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RECRUITMENT FUNNEL — TM → Centre → Client drill-down
+# ─────────────────────────────────────────────────────────────────────────────
+
+def recruitment_funnel_api(request):
+    """
+    level=tm      → one row per TM with funnel sums + distinct client count
+    level=centre  → for a TM: one row per centre
+    level=client  → for a TM (+optional centre): one row per requisition/client
+    """
+    from collections import defaultdict
+    from dashboard.models import RecruitmentFunnel
+
+    level     = request.GET.get('level', 'tm')
+    tm        = request.GET.get('tm', '')
+    centre_id = request.GET.get('centre_id', '')
+
+    FUNNEL = ['open_vacancies', 'sourced', 'screened', 'interviewed', 'offered', 'joined', 'dropped']
+
+    rows = []
+    for r in RecruitmentFunnel.objects.select_related('centre').values(
+            'req_id', 'client', 'job_role', 'centre_id', 'centre_name', 'centre__tm_name',
+            *FUNNEL):
+        rows.append({
+            'tm':          (r['centre__tm_name'] or 'Unassigned').strip(),
+            'centre_id':   r['centre_id'] or '',
+            'centre_name': r['centre_name'] or '',
+            'req_id':      r['req_id'] or '',
+            'client':      r['client'] or '',
+            'job_role':    r['job_role'] or '',
+            **{f: (r[f] or 0) for f in FUNNEL},
+        })
+
+    def blank():
+        d = {f: 0 for f in FUNNEL}
+        d['clients'] = set()
+        return d
+
+    def sum_funnel(subset):
+        out = {f: sum(r[f] for r in subset) for f in FUNNEL}
+        out['client_count'] = len(set(r['client'] for r in subset if r['client']))
+        return out
+
+    if level == 'tm':
+        buckets = defaultdict(blank)
+        for r in rows:
+            b = buckets[r['tm']]
+            for f in FUNNEL: b[f] += r[f]
+            if r['client']: b['clients'].add(r['client'])
+        data = []
+        for k in sorted(buckets):
+            b = buckets[k]
+            data.append({'tm': k, 'client_count': len(b['clients']),
+                         **{f: b[f] for f in FUNNEL}})
+        return JsonResponse({'level': 'tm', 'rows': data, 'grand_total': sum_funnel(rows)})
+
+    elif level == 'centre':
+        subset = [r for r in rows if r['tm'] == tm]
+        buckets = defaultdict(blank)
+        names = {}
+        for r in subset:
+            key = r['centre_id']
+            b = buckets[key]
+            for f in FUNNEL: b[f] += r[f]
+            if r['client']: b['clients'].add(r['client'])
+            names[key] = r['centre_name']
+        data = []
+        for k in sorted(buckets, key=lambda x: names.get(x, '')):
+            b = buckets[k]
+            data.append({'centre_id': k, 'centre_name': names.get(k, ''),
+                         'client_count': len(b['clients']), **{f: b[f] for f in FUNNEL}})
+        return JsonResponse({'level': 'centre', 'tm': tm, 'rows': data, 'grand_total': sum_funnel(subset)})
+
+    elif level == 'client':
+        subset = [r for r in rows if r['tm'] == tm]
+        if centre_id:
+            subset = [r for r in subset if r['centre_id'] == centre_id]
+        data = []
+        for r in sorted(subset, key=lambda x: x['client']):
+            data.append({'req_id': r['req_id'], 'client': r['client'], 'job_role': r['job_role'],
+                         **{f: r[f] for f in FUNNEL}})
+        return JsonResponse({'level': 'client', 'tm': tm, 'centre_id': centre_id,
+                             'rows': data, 'grand_total': sum_funnel(subset)})
+
+    return JsonResponse({'error': 'unknown level'}, status=400)
