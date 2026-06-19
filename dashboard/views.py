@@ -971,60 +971,104 @@ def sahi_view(request):
 
 def sahi_filter_options_api(request):
     """
-    Cascading filter options for the SAHI page.
-    Cascade: Zone → Region → Cluster → Sub Cluster → Existing Client
-    Zone  = SAHIDemand.zone  (Production / Technology & Services)
-    Region = SAHIDemand.region (Karan/West, Ram/South, etc.)
+    CASCADING filter options for the SAHI page.
+    Each dropdown lists only values compatible with the OTHER currently
+    selected filters (faceted search), so any combination the user can form
+    always has data. With no selections, full lists are returned.
+    Also returns sync maps so the UI can auto-align related filters:
+      cluster_map:     {cluster: {zone, region}}            (from SAHIDemand)
+      sub_cluster_map: {sub_cluster: {cluster, region, zone}}
     """
-    zone            = request.GET.get('zone', '')
-    region          = request.GET.get('region', '')
-    cluster         = request.GET.get('cluster', '')
-    sub_cluster     = request.GET.get('sub_cluster', '')
+    sel_zone    = request.GET.get('zone', '')
+    sel_region  = request.GET.get('region', '')
+    sel_cluster = request.GET.get('cluster', '')
+    sel_sc      = request.GET.get('sub_cluster', '')
+    sel_client  = request.GET.get('existing_client', '')
+    any_sel     = bool(sel_zone or sel_region or sel_cluster or sel_sc or sel_client)
 
     base_qs = SAHIDemand.objects.all()
 
-    # All zones
-    zones = sorted(set(base_qs.exclude(zone='').exclude(zone=None).values_list('zone', flat=True)))
+    def facet(exclude_field):
+        """SAHIDemand narrowed by every selected filter EXCEPT `exclude_field`."""
+        qs = base_qs
+        if sel_zone    and exclude_field != 'zone':            qs = qs.filter(zone=sel_zone)
+        if sel_region  and exclude_field != 'region':          qs = qs.filter(region=sel_region)
+        if sel_cluster and exclude_field != 'cluster':         qs = qs.filter(cluster=sel_cluster)
+        if sel_sc      and exclude_field != 'sub_cluster':     qs = qs.filter(sub_cluster=sel_sc)
+        if sel_client  and exclude_field != 'existing_client': qs = qs.filter(existing_client=sel_client)
+        return qs
 
-    # Regions — narrow by zone
-    region_qs = base_qs.exclude(region='').exclude(region=None)
-    if zone:
-        region_qs = region_qs.filter(zone=zone)
-    regions = sorted(set(region_qs.values_list('region', flat=True)))
+    def others_active(exclude_field):
+        """Is any filter other than `exclude_field` selected?"""
+        pairs = {'zone': sel_zone, 'region': sel_region, 'cluster': sel_cluster,
+                 'sub_cluster': sel_sc, 'existing_client': sel_client}
+        return any(v for k, v in pairs.items() if k != exclude_field)
 
-    # Clusters — narrow by zone + region, union with master tables
-    demand_qs_cl = base_qs.exclude(cluster='')
-    if zone:    demand_qs_cl = demand_qs_cl.filter(zone=zone)
-    if region:  demand_qs_cl = demand_qs_cl.filter(region=region)
-    clusters = sorted(
-        set(ClusterMaster.objects.exclude(cluster='').values_list('cluster', flat=True))
-        | set(Centre.objects.exclude(cluster='').exclude(cluster=None).values_list('cluster', flat=True))
-        | set(demand_qs_cl.values_list('cluster', flat=True))
-    )
+    zones = sorted(set(
+        facet('zone').exclude(zone='').exclude(zone=None).values_list('zone', flat=True)
+    ))
 
-    # Sub Clusters — narrow by zone + region + cluster
-    sc_qs = base_qs.exclude(sub_cluster='')
-    if zone:    sc_qs = sc_qs.filter(zone=zone)
-    if region:  sc_qs = sc_qs.filter(region=region)
-    if cluster: sc_qs = sc_qs.filter(cluster=cluster)
-    sc_qs_master = ClusterMaster.objects.exclude(sub_cluster='')
-    sc_qs_centre = Centre.objects.exclude(sub_cluster='').exclude(sub_cluster=None)
-    if cluster:
-        sc_qs_master = sc_qs_master.filter(cluster=cluster)
-        sc_qs_centre = sc_qs_centre.filter(cluster=cluster)
-    sub_clusters = sorted(
-        set(sc_qs_master.values_list('sub_cluster', flat=True))
-        | set(sc_qs_centre.values_list('sub_cluster', flat=True))
-        | set(sc_qs.values_list('sub_cluster', flat=True))
-    )
+    regions = sorted(set(
+        facet('region').exclude(region='').exclude(region=None).values_list('region', flat=True)
+    ))
 
-    # Existing Clients — narrow by all active filters
-    ec_qs = base_qs.exclude(existing_client='')
-    if zone:        ec_qs = ec_qs.filter(zone=zone)
-    if region:      ec_qs = ec_qs.filter(region=region)
-    if cluster:     ec_qs = ec_qs.filter(cluster=cluster)
-    if sub_cluster: ec_qs = ec_qs.filter(sub_cluster=sub_cluster)
-    existing_clients = sorted(set(ec_qs.values_list('existing_client', flat=True)))
+    clusters = sorted(set(
+        facet('cluster').exclude(cluster='').values_list('cluster', flat=True)
+    ))
+    if not others_active('cluster'):
+        # No other filters → also offer clusters known only to master tables
+        clusters = sorted(
+            set(clusters)
+            | set(ClusterMaster.objects.exclude(cluster='').values_list('cluster', flat=True))
+            | set(Centre.objects.exclude(cluster='').exclude(cluster=None).values_list('cluster', flat=True))
+        )
+
+    sub_clusters = sorted(set(
+        facet('sub_cluster').exclude(sub_cluster='').values_list('sub_cluster', flat=True)
+    ))
+    if not others_active('sub_cluster'):
+        sub_clusters = sorted(
+            set(sub_clusters)
+            | set(ClusterMaster.objects.exclude(sub_cluster='').values_list('sub_cluster', flat=True))
+            | set(Centre.objects.exclude(sub_cluster='').exclude(sub_cluster=None).values_list('sub_cluster', flat=True))
+        )
+    elif sel_cluster and not (sel_zone or sel_region or sel_client):
+        # Only Cluster selected → include its master-table sub clusters too
+        sub_clusters = sorted(
+            set(sub_clusters)
+            | set(ClusterMaster.objects.filter(cluster=sel_cluster)
+                                       .exclude(sub_cluster='').values_list('sub_cluster', flat=True))
+            | set(Centre.objects.filter(cluster=sel_cluster)
+                                .exclude(sub_cluster='').exclude(sub_cluster=None)
+                                .values_list('sub_cluster', flat=True))
+        )
+
+    existing_clients = sorted(set(
+        facet('existing_client').exclude(existing_client='').values_list('existing_client', flat=True)
+    ))
+
+    # ── Sync maps (demand data first, master tables as fallback) ──
+    cluster_map = {}
+    sub_cluster_map = {}
+    region_map = {}
+    for r in base_qs.exclude(region='').values('region', 'zone'):
+        rg = r['region']
+        if rg and rg not in region_map:
+            region_map[rg] = {'zone': r['zone'] or ''}
+    for r in base_qs.exclude(cluster='').values('cluster', 'sub_cluster', 'region', 'zone'):
+        cl = r['cluster']
+        if cl and cl not in cluster_map:
+            cluster_map[cl] = {'zone': r['zone'] or '', 'region': r['region'] or ''}
+        sc = r['sub_cluster']
+        if sc and sc not in sub_cluster_map:
+            sub_cluster_map[sc] = {'cluster': cl, 'region': r['region'] or '', 'zone': r['zone'] or ''}
+    # Fallback: master tables give sub_cluster → cluster (no zone/region info)
+    for src in (ClusterMaster.objects.exclude(sub_cluster='').values_list('sub_cluster', 'cluster'),
+                Centre.objects.exclude(sub_cluster='').exclude(sub_cluster=None)
+                              .values_list('sub_cluster', 'cluster')):
+        for sc, cl in src:
+            if sc and sc not in sub_cluster_map:
+                sub_cluster_map[sc] = {'cluster': cl or '', 'region': '', 'zone': ''}
 
     return JsonResponse({
         'zones':            zones,
@@ -1032,6 +1076,9 @@ def sahi_filter_options_api(request):
         'clusters':         clusters,
         'sub_clusters':     sub_clusters,
         'existing_clients': existing_clients,
+        'region_map':       region_map,
+        'cluster_map':      cluster_map,
+        'sub_cluster_map':  sub_cluster_map,
     })
 
 
@@ -1178,6 +1225,10 @@ def sahi_diploma_table_api(request):
     """
     cluster     = request.GET.get('cluster', '')
     sub_cluster = request.GET.get('sub_cluster', '')
+    # all_sources=1 → return ALL CommunityCollege rows for the scope (every
+    # Source & Category), used by the Demand Sub Cluster Sourcing popup's
+    # Source → Category → Name/Place → Phone/Hours drill-down.
+    all_sources = request.GET.get('all_sources', '') in ('1', 'true', 'yes')
 
     if not cluster and not sub_cluster:
         return JsonResponse({
@@ -1212,13 +1263,16 @@ def sahi_diploma_table_api(request):
         Q(category__iexact='DDU-GKY centres') |
         Q(category__icontains='Institutes & Training')
     )
+    if all_sources:
+        cat_filter = Q()   # no category restriction — every Source & Category
     qs = (CommunityCollege.objects
           .filter(cat_filter, centre__centre_id__in=centre_ids)
-          .order_by('category', 'centre__centre_name', 'name_place'))
+          .order_by('source', 'category', 'name_place'))
 
     rows = []
     for cc in qs:
         rows.append({
+            'source':      cc.source,
             'category':    cc.category,
             'name_place':  cc.name_place,
             'address':     cc.address,
@@ -1282,6 +1336,10 @@ def sahi_qp_batch_api(request):
     cluster         = request.GET.get('cluster', '')
     sub_cluster     = request.GET.get('sub_cluster', '')
     existing_client = request.GET.get('existing_client', '')
+    # designation → when set (e.g. drilling from a single Monthly Demand row),
+    # restrict the QP match to ONLY that designation, so unmapped designations
+    # (Engineering, Quality Control, …) correctly return no rows.
+    only_designation = request.GET.get('designation', '').strip()
 
     # Step 1 — demand rows for current filter
     demand_qs = SAHIDemand.objects.all()
@@ -1297,6 +1355,10 @@ def sahi_qp_batch_api(request):
                  .distinct()
     )
 
+    # If drilling from a single row, keep only that designation
+    if only_designation:
+        designations = {only_designation} & designations or {only_designation}
+
     if not designations:
         return JsonResponse({
             'rows': [], 'totals': {'rows': 0, 'enrol': 0, 'cert': 0, 'place': 0},
@@ -1305,17 +1367,19 @@ def sahi_qp_batch_api(request):
         })
 
     # Step 2 — designations → QPs
-    qp_set = set(
+    dq_pairs = list(
         DesignationQPMap.objects
         .filter(designation__in=designations)
-        .values_list('qp', flat=True)
+        .values_list('designation', 'qp')
     )
+    qp_set = set(qp for _, qp in dq_pairs)
 
-    unmapped = designations - set(
-        DesignationQPMap.objects
-        .filter(designation__in=designations)
-        .values_list('designation', flat=True)
-    )
+    # Reverse map QP → designation(s) in scope, so each row can show its Designation
+    qp_to_desig = {}
+    for desig, qp in dq_pairs:
+        qp_to_desig.setdefault(qp, set()).add(desig)
+
+    unmapped = designations - set(d for d, _ in dq_pairs)
 
     if not qp_set:
         return JsonResponse({
@@ -1342,6 +1406,7 @@ def sahi_qp_batch_api(request):
     rows = [{
         'centre_name': r['centre_name']          or '—',
         'qp':          r['qp']                   or '—',
+        'designation': ', '.join(sorted(qp_to_desig.get(r['qp'], []))) or '—',
         'cluster':     r['centre__cluster']      or '—',
         'sub_cluster': r['centre__sub_cluster']  or '—',
         'enrol':       r['enrol']  or 0,
@@ -1366,7 +1431,72 @@ def sahi_qp_batch_api(request):
     })
 
 
-def _emp_sub_cluster_state(emp_sub_cluster):
+def sahi_centre_team_api(request):
+    """
+    Centre contact / team details for the centres in a scope, keyed by Centre ID.
+
+    SPOC (from Ops_Team via Centre): BU Head, PMT Lead, TM Name.
+    Centre staff (from Manpower_Master_1 via ManpowerStaff role):
+        Centre Manager Name, Placement Officer Name, Mobilizer Name.
+
+    Scope is resolved the same way as the other SAHI tables, by
+    cluster / sub_cluster (a sub_cluster value may be an Employability Sub
+    Cluster name, which maps directly to Centre.sub_cluster).
+    """
+    cluster     = request.GET.get('cluster', '')
+    sub_cluster = request.GET.get('sub_cluster', '')
+
+    centres = Centre.objects.all()
+    if sub_cluster:
+        centres = centres.filter(sub_cluster=sub_cluster)
+    elif cluster:
+        centres = centres.filter(cluster=cluster)
+    else:
+        return JsonResponse({'rows': [], 'totals': {'centres': 0},
+                             'message': 'Select a cluster or sub cluster.'})
+
+    centres = centres.exclude(centre_id='').exclude(centre_id=None).distinct()
+
+    # Pre-build a Centre ID → {role: [names]} map from ManpowerStaff (active first)
+    staff_by_centre = {}
+    for st in (ManpowerStaff.objects
+               .filter(centre__in=centres)
+               .values('centre__centre_id', 'role', 'employee_name', 'employee_status')):
+        cid  = st['centre__centre_id']
+        role = (st['role'] or '').strip().lower()
+        name = (st['employee_name'] or '').strip()
+        if not cid or not name:
+            continue
+        staff_by_centre.setdefault(cid, {}).setdefault(role, []).append(name)
+
+    def names_for(cid, role_key):
+        return ', '.join(staff_by_centre.get(cid, {}).get(role_key, [])) or '—'
+
+    rows = []
+    for c in centres.order_by('centre_name'):
+        cid = c.centre_id
+        rows.append({
+            'centre_id':         cid,
+            'centre_name':       c.centre_name or '—',
+            'sub_cluster':       c.sub_cluster or '—',
+            # SPOC (Ops_Team)
+            'bu_head':           (c.bu_head  or '').strip() or '—',
+            'pmt_lead':          (c.pmt_lead or '').strip() or '—',
+            'tm_name':           (c.tm_name  or '').strip() or '—',
+            # Centre staff (Manpower_Master_1)
+            'centre_manager':    names_for(cid, 'centre manager'),
+            'placement_officer': names_for(cid, 'placement officer'),
+            'mobilizer':         names_for(cid, 'mobilizer'),
+        })
+
+    return JsonResponse({
+        'rows':   rows,
+        'totals': {'centres': len(rows)},
+        'scope':  sub_cluster or cluster,
+    })
+
+
+
     """
     Given an Employability Sub Cluster name, return the physical State of the
     Centre(s) in that sub-cluster (from Center Master). Used to filter associates
@@ -1403,6 +1533,21 @@ def sahi_worksetu_filter_options_api(request):
     sub_cluster     = request.GET.get('sub_cluster', '')
     existing_client = request.GET.get('existing_client', '')
     emp_sub_cluster = request.GET.get('emp_sub_cluster', '')
+    # with_iti_data=1 → only return options that actually have ITI / Polytechnic
+    # directory matches (used by the Supply Sub Cluster Sourcing popup, so we
+    # never offer a filter choice that would show an empty table).
+    with_iti_data   = request.GET.get('with_iti_data', '') in ('1', 'true', 'yes')
+    # with_supply_data=1 → only return options that yield at least one associate
+    # under the CURRENT SAHI filters (main page WorkSetu Supply Filters section,
+    # so the Supply Summary table is never empty for a selectable option).
+    with_supply_data = request.GET.get('with_supply_data', '') in ('1', 'true', 'yes')
+
+    dir_pins = set()
+    if with_iti_data:
+        dir_pins = set(
+            ITIPolytechnicByPIN.objects.exclude(supply_pin='')
+                               .values_list('supply_pin', flat=True)
+        )
 
     # 1. Employability Sub Clusters = Associate Data ∩ Center Master (by Sub Cluster ID)
     assoc_scids = set(
@@ -1422,6 +1567,52 @@ def sahi_worksetu_filter_options_api(request):
         .exclude(sub_cluster='').exclude(sub_cluster=None)
         .values_list('sub_cluster', flat=True)
     ))
+
+    if with_iti_data:
+        # Keep only Employability Sub Clusters whose state has at least one
+        # associate Supply PIN present in the ITI / Polytechnic directory.
+        states_with_data = set(
+            AssociateData.objects
+            .filter(supply_pin__in=dir_pins)
+            .exclude(supply_state='').exclude(supply_state=None)
+            .values_list('supply_state', flat=True)
+            .distinct()
+        )
+        sc_states = {}
+        for sc, st in (Centre.objects
+                       .exclude(sub_cluster='').exclude(sub_cluster=None)
+                       .exclude(state='').exclude(state=None)
+                       .values_list('sub_cluster', 'state').distinct()):
+            sc_states.setdefault(sc, set()).add(st)
+        emp_sub_clusters = [
+            sc for sc in emp_sub_clusters
+            if sc_states.get(sc, set()) & states_with_data
+        ]
+
+    if with_supply_data:
+        # Keep only Employability Sub Clusters whose state matches at least one
+        # associate inside the CURRENT SAHI scope (zone/region/cluster/sub
+        # cluster + client) — guarantees the Supply Summary table has rows.
+        assoc_scope = AssociateData.objects.all()
+        if zone or region or cluster or sub_cluster:
+            scid = _sahi_sub_cluster_ids_for_filter(cluster, sub_cluster, zone=zone, region=region)
+            assoc_scope = assoc_scope.filter(sub_cluster_id__in=scid) if scid else assoc_scope.none()
+        if existing_client:
+            assoc_scope = assoc_scope.filter(client=existing_client)
+        scoped_states = set(
+            assoc_scope.exclude(supply_state='').exclude(supply_state=None)
+                       .values_list('supply_state', flat=True).distinct()
+        )
+        sc_states2 = {}
+        for sc, st in (Centre.objects
+                       .exclude(sub_cluster='').exclude(sub_cluster=None)
+                       .exclude(state='').exclude(state=None)
+                       .values_list('sub_cluster', 'state').distinct()):
+            sc_states2.setdefault(sc, set()).add(st)
+        emp_sub_clusters = [
+            sc for sc in emp_sub_clusters
+            if sc_states2.get(sc, set()) & scoped_states
+        ]
 
     # 2. WorkSetu Sub Clusters — derived from in-scope associates' supply PINs.
     assoc_ws = AssociateData.objects.all()
@@ -1445,6 +1636,10 @@ def sahi_worksetu_filter_options_api(request):
     supply_pins = set(
         assoc_ws.exclude(supply_pin='').values_list('supply_pin', flat=True).distinct()
     )
+    if with_iti_data:
+        # Only PINs that exist in the ITI / Polytechnic directory → only
+        # WorkSetu Sub Clusters that will show at least one institution.
+        supply_pins &= dir_pins
     worksetu_sub_clusters = sorted(set(
         WorkSetuPINMap.objects
         .filter(supply_pin__in=supply_pins)

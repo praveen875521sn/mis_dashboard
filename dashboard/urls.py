@@ -42,6 +42,7 @@ urlpatterns = [
     path('api/sahi/demand-table/',     views.sahi_demand_table_api,     name='sahi_demand_table_api'),
     path('api/sahi/centre-table/',     views.sahi_centre_table_api,     name='sahi_centre_table_api'),
     path('api/sahi/qp-batch/',         views.sahi_qp_batch_api,         name='sahi_qp_batch_api'),
+    path('api/sahi/centre-team/',      views.sahi_centre_team_api,      name='sahi_centre_team_api'),
     path('api/sahi/diploma-table/',    views.sahi_diploma_table_api,    name='sahi_diploma_table_api'),
     path('api/sahi/supply-summary/',      views.sahi_supply_summary_api,          name='sahi_supply_summary_api'),
     path('api/sahi/worksetu-filter/',     views.sahi_worksetu_filter_options_api, name='sahi_worksetu_filter_options_api'),
