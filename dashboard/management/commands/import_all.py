@@ -20,7 +20,7 @@ class Command(BaseCommand):
         parser.add_argument('--data-dir', default='data')
         parser.add_argument(
             '--only',
-            choices=['main', 'staffing', 'sahi', 'designation', 'worksetu', 'targets', 'productivity'],
+            choices=['main', 'staffing', 'sahi', 'designation', 'worksetu', 'targets', 'productivity', 'sourcing'],
             help='Run only one phase.'
         )
         parser.add_argument('--skip-main',         action='store_true')
@@ -30,6 +30,7 @@ class Command(BaseCommand):
         parser.add_argument('--skip-worksetu',     action='store_true')
         parser.add_argument('--skip-targets',      action='store_true')
         parser.add_argument('--skip-productivity', action='store_true')
+        parser.add_argument('--skip-sourcing',     action='store_true')
 
     def handle(self, *args, **options):
         data_dir = options['data_dir']
@@ -42,6 +43,7 @@ class Command(BaseCommand):
         run_worksetu     = (only is None or only == 'worksetu')      and not options.get('skip_worksetu', False)
         run_targets      = (only is None or only == 'targets')      and not options['skip_targets']
         run_productivity = (only is None or only == 'productivity') and not options['skip_productivity']
+        run_sourcing     = (only is None or only == 'sourcing')     and not options.get('skip_sourcing', False)
 
         steps = []
         if run_main:         steps.append('main')
@@ -51,6 +53,7 @@ class Command(BaseCommand):
         if run_worksetu:     steps.append('worksetu')
         if run_targets:      steps.append('targets')
         if run_productivity: steps.append('productivity')
+        if run_sourcing:     steps.append('sourcing')
         if not steps:
             raise CommandError('Nothing to do — all phases were skipped.')
 
@@ -137,6 +140,12 @@ class Command(BaseCommand):
             idx += 1
             self._heading(f'{idx}/{total}  Productivity & Supply — import_productivity_supply')
             call_command('import_productivity_supply', f'--data-dir={data_dir}')
+
+        # 7. Batch-level Sourcing (Master + Actual + Target)
+        if run_sourcing:
+            idx += 1
+            self._heading(f'{idx}/{total}  Batch Sourcing — import_batch_sourcing')
+            call_command('import_batch_sourcing')
 
         self.stdout.write(self.style.SUCCESS('\n✓ All requested imports complete.'))
 

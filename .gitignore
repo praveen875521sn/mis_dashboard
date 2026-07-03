@@ -12,8 +12,5 @@ db.sqlite3.old
 # Excel temp locks
 ~$*.xlsx
 views_before.py
-venv/
-.idea/
-__pycache__/
-*.pyc
-!db.sqlite3
+
+.env

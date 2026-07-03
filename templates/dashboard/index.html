@@ -55,8 +55,17 @@
   {% if cluster_filter %}<input type="hidden" name="cluster" value="{{ cluster_filter }}">{% endif %}
   {% if sub_cluster_filter %}<input type="hidden" name="sub_cluster" value="{{ sub_cluster_filter }}">{% endif %}
 
-  <!-- Row 1: BU Head → TM Name -->
+  <!-- Row 1: Projects_FY → BU Head → TM Name -->
   <div class="filter-row">
+    <div class="filter-group">
+      <label>📅 Projects FY</label>
+      <select name="projects_fy" id="f-projects-fy">
+        <option value="">All Projects FY</option>
+        {% for pf in projects_fy_options %}
+          <option value="{{ pf }}" {% if pf == projects_fy_filter %}selected{% endif %}>{{ pf }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <div class="filter-group">
       <label>👤 BU Head</label>
       <select name="bu_head" id="f-bu-head">
@@ -329,120 +338,73 @@
 {% endif %}
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
-     COMMUNITY COLLEGES TABLE
+     ACTUAL SOURCING SUMMARY (Batch-ID keyed, drill-down: Source → Category → Details)
      ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="card" id="community-colleges-card">
+<div class="card" id="sourcing-actual-card">
   <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
     <div>
-      <div class="card-title">🏫 Community Colleges &amp; Training Institutes</div>
-      <div style="font-size:12px;color:var(--muted);">Nearby institutes mapped to each centre — select a centre to filter</div>
+      <div class="card-title">🎯 Actual Sourcing Summary</div>
+      <div style="font-size:12px;color:var(--muted);">
+        Candidates sourced per Batch by Community Source — click a count to drill into Categories, then Details
+      </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <select id="cc-centre-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
-        <option value="">All Centres</option>
-        {% for c in centres %}
-          <option value="{{ c.centre_id }}" {% if c.centre_id == centre_id_filter %}selected{% endif %}>{{ c.centre_name }}</option>
-        {% endfor %}
-      </select>
-      <select id="cc-source-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
-        <option value="">All Sources</option>
-      </select>
-      <select id="cc-category-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
-        <option value="">All Categories</option>
-      </select>
-      <span id="cc-count" style="font-size:12px;color:var(--muted);white-space:nowrap;">Loading...</span>
-    </div>
+    <span id="sa-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
   </div>
   <div class="card-body table-wrap">
-    <table id="cc-table">
-      <thead>
-        <tr>
-          <th class="left">Source</th>
-          <th class="left">Category</th>
-          <th class="left">Name / Place</th>
-          <th class="left">Address</th>
-          <th class="left">Phone / Hours</th>
-          <th class="left">Centre Name</th>
-          <th>Distance (km)</th>
-          <th>Rating</th>
-        </tr>
-      </thead>
-      <tbody id="cc-tbody">
-        <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
-      </tbody>
+    <table class="src-table" id="sa-table">
+      <thead id="sa-thead"></thead>
+      <tbody id="sa-tbody"></tbody>
     </table>
   </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
-     SOURCING SUMMARY (Community Sources & Categories)
+     TARGET SOURCING SUMMARY (Batch-ID keyed, drill-down: Source → Category)
      ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="card" id="sourcing-summary-card">
+<div class="card" id="sourcing-target-card">
   <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
     <div>
-      <div class="card-title">🎯 Sourcing Summary</div>
+      <div class="card-title">🎯 Target Sourcing Summary</div>
       <div style="font-size:12px;color:var(--muted);">
-        Community Sources &amp; Categories — Active = at least one matching candidate in Actual data
+        Sourcing targets per Batch by Community Source — click a count to see Category-wise targets
       </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <select id="ss-centre-filter" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);">
-        <option value="">All Centres</option>
-        {% for c in centres %}
-          <option value="{{ c.centre_id }}" {% if c.centre_id == centre_id_filter %}selected{% endif %}>{{ c.centre_name }}</option>
-        {% endfor %}
-      </select>
-      <span id="ss-summary" style="font-size:12px;color:var(--muted);white-space:nowrap;">Loading...</span>
-    </div>
+    <span id="st-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
   </div>
-
-  <!-- Legend: coloured dots per Community Source (matches the mock screenshot) -->
-  <div id="ss-legend" style="display:flex;flex-wrap:wrap;gap:14px 22px;padding:10px 16px 6px 16px;font-size:12px;color:var(--muted);"></div>
-
   <div class="card-body table-wrap">
-    <table id="ss-table">
-      <thead>
-        <tr>
-          <th class="left" style="width:36px;"></th>
-          <th class="left">Community Source / Category</th>
-          <th style="text-align:right;">Candidate Count</th>
-          <th>Status</th>
-          <th style="text-align:right;">Categories</th>
-        </tr>
-      </thead>
-      <tbody id="ss-tbody">
-        <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">Loading...</td></tr>
-      </tbody>
+    <table class="src-table" id="st-table">
+      <thead id="st-thead"></thead>
+      <tbody id="st-tbody"></tbody>
     </table>
   </div>
 </div>
 
 <style>
-  /* Sourcing Summary – local styles (scoped to the card) */
-  #sourcing-summary-card .ss-dot {
-    display:inline-block; width:10px; height:10px; border-radius:50%;
-    margin-right:8px; vertical-align:middle; flex-shrink:0;
+  /* Sourcing tables — shared local styles */
+  .src-table td.src-num { text-align:right; font-variant-numeric:tabular-nums; }
+  .src-table td.src-clickable {
+    cursor:pointer; color:#1d4ed8; font-weight:600; text-decoration:underline dotted;
   }
-  #sourcing-summary-card .ss-source-row {
-    cursor:pointer; transition:background .15s;
+  .src-table td.src-clickable:hover { background:#eff6ff; }
+  .src-table tr.src-drill-row td { background:#f8fafc; }
+  .src-table .src-drill-box {
+    margin:6px 4px 10px 4px; border:1px solid var(--border); border-radius:8px;
+    background:#fff; overflow:hidden;
   }
-  #sourcing-summary-card .ss-source-row:hover { background:#f8fafc; }
-  #sourcing-summary-card .ss-source-row td { font-weight:600; }
-  #sourcing-summary-card .ss-chev {
-    display:inline-block; width:18px; text-align:center;
-    transition:transform .18s; color:var(--muted); font-size:11px;
+  .src-table .src-drill-head {
+    padding:7px 12px; font-size:12px; font-weight:600; background:#eef2ff; color:#3730a3;
+    display:flex; justify-content:space-between; align-items:center;
   }
-  #sourcing-summary-card .ss-source-row.open .ss-chev { transform:rotate(90deg); }
-  #sourcing-summary-card .ss-cat-row td {
-    background:#f8fafc; font-weight:400; font-size:13px; padding-left:22px;
+  .src-table .src-drill-table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .src-table .src-drill-table th {
+    text-align:left; padding:6px 12px; background:#f1f5f9; color:#475569;
+    font-size:11px; text-transform:uppercase; letter-spacing:.4px;
   }
-  #sourcing-summary-card .ss-cat-row td.ss-cat-name { padding-left:54px; color:var(--text); }
-  #sourcing-summary-card .ss-badge {
-    display:inline-block; padding:2px 10px; border-radius:999px;
-    font-size:11px; font-weight:600; letter-spacing:.3px;
-  }
-  #sourcing-summary-card .ss-badge.active   { background:#d1fae5; color:#065f46; }
-  #sourcing-summary-card .ss-badge.inactive { background:#fee2e2; color:#991b1b; }
+  .src-table .src-drill-table td { padding:6px 12px; border-top:1px solid #f1f5f9; }
+  .src-table .src-cat-click { cursor:pointer; color:#1d4ed8; font-weight:600; text-decoration:underline dotted; }
+  .src-table .src-cat-click:hover { background:#eff6ff; }
+  .src-table .src-empty { text-align:center; padding:22px; color:var(--muted); }
+  .src-orphan { color:#b45309; font-style:italic; }
 </style>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
@@ -767,236 +729,117 @@ tmNameSel.addEventListener('change',  () => updateCascade('tm_name'));
 projectSel.addEventListener('change', () => updateCascade('project'));
 centreSel.addEventListener('change',  () => updateCascade('centre'));
 
-// ── Community Colleges loader ─────────────────────────────────────────────────
-function ratingStars(r) {
-  if (!r) return '—';
-  return '⭐ ' + parseFloat(r).toFixed(1);
+
+
+// ── Actual & Target Sourcing Summary (Batch-ID keyed, drill-down) ─────────────
+const SRC_COLS        = {{ sourcing_source_cols|safe }};
+const SRC_ACTUAL_ROWS = {{ sourcing_actual_rows|safe }};
+const SRC_TARGET_ROWS = {{ sourcing_target_rows|safe }};
+
+function srcEsc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// Load both Source + Category dropdowns for the selected centre.
-// Source is always the full per-centre list. Category narrows further by the
-// currently selected source (if any) — selecting a source filters categories.
-function loadCCFilterOptions() {
-  const centreId = document.getElementById('cc-centre-filter').value;
-  const srcSel   = document.getElementById('cc-source-filter');
-  const catSel   = document.getElementById('cc-category-filter');
-  if (!centreId) {
-    srcSel.innerHTML = '<option value="">All Sources</option>';
-    catSel.innerHTML = '<option value="">All Categories</option>';
-    return;
-  }
-  const currentSrc = srcSel.value;
-  const currentCat = catSel.value;
-  const params = new URLSearchParams({ centre_id: centreId });
-  if (currentSrc) params.set('source', currentSrc);
-  fetch(`/api/community-college-categories/?${params}`)
-    .then(r => r.json())
-    .then(data => {
-      srcSel.innerHTML = '<option value="">All Sources</option>' +
-        (data.sources || []).map(s => `<option value="${s}" ${s === currentSrc ? 'selected' : ''}>${s}</option>`).join('');
-      catSel.innerHTML = '<option value="">All Categories</option>' +
-        (data.categories || []).map(cat => `<option value="${cat}" ${cat === currentCat ? 'selected' : ''}>${cat}</option>`).join('');
-    });
-}
+function srcBuildTable(kind, rows, withTargetCol) {
+  const thead = document.getElementById(kind + '-thead');
+  const tbody = document.getElementById(kind + '-tbody');
+  const count = document.getElementById(kind + '-count');
+  count.textContent = rows.length + ' batches';
 
-function loadCommunityColleges() {
-  const centreId = document.getElementById('cc-centre-filter').value;
-  const source   = document.getElementById('cc-source-filter').value;
-  const category = document.getElementById('cc-category-filter').value;
+  let head = '<tr><th class="left">Center Name</th><th class="left">Batch ID</th>';
+  if (withTargetCol) head += '<th style="text-align:right;">Target</th>';
+  SRC_COLS.forEach(s => head += `<th style="text-align:right;">${srcEsc(s)}</th>`);
+  head += '</tr>';
+  thead.innerHTML = head;
 
-  // Require at least a centre to be selected
-  if (!centreId) {
-    document.getElementById('cc-count').textContent = '';
-    document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--muted);">👆 Please select a centre to view nearby institutes</td></tr>';
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td class="src-empty" colspan="${SRC_COLS.length + (withTargetCol ? 3 : 2)}">No sourcing data for the current filters</td></tr>`;
     return;
   }
 
-  const params = new URLSearchParams({ centre_id: centreId });
-  if (source)   params.set('source', source);
-  if (category) params.set('category', category);
-  document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
-  fetch(`/api/community-colleges/?${params}`)
-    .then(r => r.json())
-    .then(data => {
-      document.getElementById('cc-count').textContent = `${data.count} record${data.count !== 1 ? 's' : ''}`;
-      if (data.results.length === 0) {
-        document.getElementById('cc-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">No records found for the selected filters</td></tr>';
-        return;
-      }
-      document.getElementById('cc-tbody').innerHTML = data.results.map(r => `
-        <tr>
-          <td class="left" style="font-size:12px;">${r.source || '—'}</td>
-          <td class="left"><span class="role-badge" style="background:var(--enrol-light,#eff6ff);color:var(--enrol,#3b82f6);">${r.category || '—'}</span></td>
-          <td class="left"><strong>${r.name_place || '—'}</strong></td>
-          <td class="left" style="font-size:12px;max-width:220px;white-space:normal;">${r.address || '—'}</td>
-          <td class="left" style="font-size:12px;max-width:160px;white-space:normal;">${r.phone_hours || '—'}</td>
-          <td class="left" style="font-size:12px;">${r.centre_name || '—'}</td>
-          <td style="text-align:center;">${r.distance_km != null ? parseFloat(r.distance_km).toFixed(2) + ' km' : '—'}</td>
-          <td style="text-align:center;">${ratingStars(r.rating)}</td>
-        </tr>
-      `).join('');
+  let html = '';
+  rows.forEach((r, i) => {
+    const orphan = r.centre === '(not in Batch Plan)';
+    html += `<tr data-row="${i}">` +
+      `<td class="left ${orphan ? 'src-orphan' : ''}">${srcEsc(r.centre)}</td>` +
+      `<td class="left" style="white-space:nowrap;">${srcEsc(r.batch_id)}</td>`;
+    if (withTargetCol) html += `<td class="src-num"><strong>${r.total}</strong></td>`;
+    SRC_COLS.forEach(s => {
+      const v = r.sources[s] || 0;
+      const clickable = v > 0 && r.drill[s];
+      html += `<td class="src-num ${clickable ? 'src-clickable' : ''}"` +
+        (clickable ? ` onclick="srcToggleDrill('${kind}', ${i}, '${srcEsc(s).replace(/'/g, "\\'")}', this)"` : '') +
+        `>${v || '0'}</td>`;
     });
-}
-
-document.getElementById('cc-centre-filter').addEventListener('change', function() {
-  // New centre → reset Source + Category, repopulate both
-  document.getElementById('cc-source-filter').value   = '';
-  document.getElementById('cc-category-filter').value = '';
-  loadCCFilterOptions();
-  loadCommunityColleges();
-});
-document.getElementById('cc-source-filter').addEventListener('change', function() {
-  // Changing Source narrows the Category dropdown; also reset Category to "all"
-  document.getElementById('cc-category-filter').value = '';
-  loadCCFilterOptions();
-  loadCommunityColleges();
-});
-document.getElementById('cc-category-filter').addEventListener('change', loadCommunityColleges);
-
-// No auto-load on page init — show placeholder until user selects
-loadCommunityColleges();   // will show placeholder since no centre selected
-
-// Pre-select centre from URL if present
-(function() {
-  const params = new URLSearchParams(window.location.search);
-  const c = params.get('centre');
-  if (c) {
-    document.getElementById('cc-centre-filter').value = c;
-    loadCCFilterOptions();
-    loadCommunityColleges();
-  }
-})();
-
-// ── Sourcing Summary loader ──────────────────────────────────────────────────
-//
-// Renders the Source → Category tree from /api/sourcing-summary/.
-// Source rows are clickable: clicking toggles the visibility of the child
-// Category rows that follow it (no second network call — categories arrive
-// with the source payload). Active/Inactive badges are computed server-side
-// and respect the chosen centre filter.
-
-const SS_SOURCE_COLORS = {
-  'Community Mobilisation':            '#ef4444',  // red
-  'Training & Education Institutions': '#3b82f6',  // blue
-  'Government Ecosystem':              '#10b981',  // green
-  'Referral-Based Sourcing':           '#f59e0b',  // amber
-  'Digital / WhatsApp Campaigns':      '#94a3b8',  // slate
-  'Employer-Linked Sourcing':          '#a855f7',  // purple
-};
-const SS_DEFAULT_COLOR = '#64748b';
-
-function ssColor(src) {
-  return SS_SOURCE_COLORS[src] || SS_DEFAULT_COLOR;
-}
-
-function ssFmtCount(n) {
-  return (n || 0).toLocaleString('en-IN');
-}
-
-function ssBadge(active) {
-  return active
-    ? '<span class="ss-badge active">Active</span>'
-    : '<span class="ss-badge inactive">Inactive</span>';
-}
-
-function renderSourcingLegend(sources) {
-  // Show each source once, in the order returned by the API.
-  const seen = new Set();
-  const items = [];
-  for (const s of sources) {
-    if (seen.has(s.source)) continue;
-    seen.add(s.source);
-    items.push(
-      `<span style="display:inline-flex;align-items:center;">
-         <span class="ss-dot" style="background:${ssColor(s.source)};"></span>${s.source}
-       </span>`
-    );
-  }
-  document.getElementById('ss-legend').innerHTML = items.join('');
-}
-
-function renderSourcingTable(data) {
-  const tbody = document.getElementById('ss-tbody');
-  if (!data.sources || data.sources.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted);">No sourcing data found</td></tr>';
-    return;
-  }
-
-  const html = [];
-  data.sources.forEach((s, idx) => {
-    const color = ssColor(s.source);
-    // Parent (Source) row
-    html.push(`
-      <tr class="ss-source-row" data-idx="${idx}">
-        <td class="left" style="text-align:center;"><span class="ss-chev">▶</span></td>
-        <td class="left">
-          <span class="ss-dot" style="background:${color};"></span>${s.source}
-        </td>
-        <td style="text-align:right;">${ssFmtCount(s.count)}</td>
-        <td style="text-align:center;">${ssBadge(s.active)}</td>
-        <td style="text-align:right;font-weight:500;">
-          <span style="color:var(--muted);">${s.category_active}/${s.category_total}</span>
-        </td>
-      </tr>
-    `);
-    // Child (Category) rows — hidden by default
-    s.categories.forEach(cat => {
-      html.push(`
-        <tr class="ss-cat-row" data-parent="${idx}" style="display:none;">
-          <td></td>
-          <td class="left ss-cat-name">${cat.category}</td>
-          <td style="text-align:right;">${ssFmtCount(cat.count)}</td>
-          <td style="text-align:center;">${ssBadge(cat.active)}</td>
-          <td></td>
-        </tr>
-      `);
-    });
+    html += '</tr>';
   });
-  tbody.innerHTML = html.join('');
+  tbody.innerHTML = html;
+}
 
-  // Wire expand/collapse
-  tbody.querySelectorAll('.ss-source-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const idx = row.dataset.idx;
-      const isOpen = row.classList.toggle('open');
-      tbody.querySelectorAll(`.ss-cat-row[data-parent="${idx}"]`).forEach(r => {
-        r.style.display = isOpen ? '' : 'none';
-      });
-    });
+// Drill level 1: Source → Category counts (Target stops here; Actual counts are clickable → details)
+function srcToggleDrill(kind, rowIdx, source, cell) {
+  const tbody = document.getElementById(kind + '-tbody');
+  const existing = tbody.querySelector(`tr.src-drill-row[data-parent="${rowIdx}"]`);
+  const wasOpenSame = existing && existing.dataset.source === source;
+  if (existing) existing.remove();
+  if (wasOpenSame) return;
+
+  const rows = kind === 'sa' ? SRC_ACTUAL_ROWS : SRC_TARGET_ROWS;
+  const r = rows[rowIdx];
+  const cats = r.drill[source];
+  if (!cats) return;
+
+  const colspan = SRC_COLS.length + (kind === 'st' ? 3 : 2);
+  let inner = `<div class="src-drill-box">` +
+    `<div class="src-drill-head"><span>${srcEsc(r.batch_id)} — ${srcEsc(source)} · Category-wise</span>` +
+    `<span style="cursor:pointer;font-weight:400;" onclick="this.closest('tr').remove()">✕ close</span></div>` +
+    `<table class="src-drill-table"><tr><th>Community Category</th><th style="text-align:right;">${kind === 'sa' ? 'Candidates' : 'Target'}</th></tr>`;
+
+  Object.keys(cats).sort().forEach(cat => {
+    if (kind === 'sa') {
+      const c = cats[cat];
+      inner += `<tr><td>${srcEsc(cat)}</td>` +
+        `<td class="src-num src-cat-click" onclick="srcShowDetails('${kind}', ${rowIdx}, '${srcEsc(source).replace(/'/g, "\\'")}', '${srcEsc(cat).replace(/'/g, "\\'")}', this)">${c.count}</td></tr>` +
+        `<tr class="src-detail-slot" data-cat="${srcEsc(cat)}" style="display:none;"><td colspan="2"></td></tr>`;
+    } else {
+      inner += `<tr><td>${srcEsc(cat)}</td><td class="src-num">${cats[cat]}</td></tr>`;
+    }
   });
+  inner += '</table></div>';
+
+  const tr = document.createElement('tr');
+  tr.className = 'src-drill-row';
+  tr.dataset.parent = rowIdx;
+  tr.dataset.source = source;
+  tr.innerHTML = `<td colspan="${colspan}">${inner}</td>`;
+  cell.closest('tr').after(tr);
 }
 
-function loadSourcingSummary() {
-  const centreId = document.getElementById('ss-centre-filter').value;
-  const summaryEl = document.getElementById('ss-summary');
-  summaryEl.textContent = 'Loading...';
-  document.getElementById('ss-tbody').innerHTML =
-    '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);">Loading...</td></tr>';
+// Drill level 2 (Actual only): Category → channel-level details
+function srcShowDetails(kind, rowIdx, source, cat, cell) {
+  const slot = cell.closest('table').querySelector(`tr.src-detail-slot[data-cat="${CSS.escape ? cat : cat}"]`)
+            || cell.closest('tr').nextElementSibling;
+  if (!slot) return;
+  if (slot.style.display !== 'none') { slot.style.display = 'none'; return; }
 
-  const params = new URLSearchParams();
-  if (centreId) params.set('centre_id', centreId);
-
-  fetch(`/api/sourcing-summary/?${params}`)
-    .then(r => r.json())
-    .then(data => {
-      const t = data.totals || {};
-      summaryEl.textContent =
-        `${t.active_sources || 0}/${t.sources || 0} Sources Active · ` +
-        `${t.categories || 0} Categories · ` +
-        `${ssFmtCount(t.leads)} Leads`;
-      renderSourcingLegend(data.sources || []);
-      renderSourcingTable(data);
-    })
-    .catch(err => {
-      console.error('Sourcing summary load failed', err);
-      summaryEl.textContent = 'Failed to load';
-      document.getElementById('ss-tbody').innerHTML =
-        '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--danger);">Failed to load sourcing summary</td></tr>';
-    });
+  const rows = kind === 'sa' ? SRC_ACTUAL_ROWS : SRC_TARGET_ROWS;
+  const details = ((rows[rowIdx].drill[source] || {})[cat] || {}).details || [];
+  let inner = `<table class="src-drill-table" style="background:#fffbeb;">` +
+    `<tr><th>Channel Name</th><th>SPOC</th><th>Contact</th><th>Location</th><th style="text-align:right;">Candidates</th></tr>`;
+  details.forEach(d => {
+    inner += `<tr><td>${srcEsc(d.channel) || '—'}</td><td>${srcEsc(d.spoc) || '—'}</td>` +
+      `<td>${srcEsc(d.contact) || '—'}</td><td>${srcEsc(d.location) || '—'}</td>` +
+      `<td class="src-num">${d.count}</td></tr>`;
+  });
+  inner += '</table>';
+  slot.firstElementChild.innerHTML = inner;
+  slot.style.display = '';
 }
 
-document.getElementById('ss-centre-filter').addEventListener('change', loadSourcingSummary);
-loadSourcingSummary();
+srcBuildTable('sa', SRC_ACTUAL_ROWS, false);
+srcBuildTable('st', SRC_TARGET_ROWS, true);
+
 
 // ════════════════════════════════════════════════════════════════════════════
 // STAFFING TAB JS

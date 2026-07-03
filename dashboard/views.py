@@ -12,6 +12,7 @@ from .models import (AssociateData, BatchPlan, Centre, ClusterMaster,
                      ManpowerStaff, NapsEligible,
                      SAHIDemand, SambhavCommunity, SFInterventionCollege,
                      SourcingActual, SourcingChannelMaster,
+                     SourcingComplete, SourcingTarget,
                      WorkSetuPINMap)
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -2820,6 +2821,97 @@ def build_batch_delay_rows(batches_qs):
     return rows
 
 
+def build_batch_sourcing_tables(batches_qs):
+    """Build the Actual & Target Sourcing Summary tables for the Employability page.
+
+    Both tables are keyed on Batch ID:
+      * Actual — SourcingComplete.batch_id ↔ BatchPlan.batch_id
+      * Target — SourcingTarget.batch_id  ↔ BatchPlan.batch_id
+    Columns are the Community Sources from SourcingChannelMaster (fixed order).
+    Each row carries a drill-down: Source → Category → channel-level details.
+    Only batches inside the current filter scope (batches_qs) are shown; sourcing
+    rows whose batch is missing from Batch Plan are appended flagged as
+    '(not in Batch Plan)' so no data silently disappears.
+    """
+    # Canonical source column order: master order of first appearance
+    source_cols, seen = [], set()
+    for src in SourcingChannelMaster.objects.values_list('community_source', flat=True):
+        if src not in seen:
+            seen.add(src)
+            source_cols.append(src)
+
+    bp_map = dict(batches_qs.values_list('batch_id', 'centre_name'))
+    scoped_ids = set(bp_map)
+    # For "not in Batch Plan" detection we must check ALL batches, not just scope
+    all_bp_ids = set(BatchPlan.objects.values_list('batch_id', flat=True))
+
+    def _include(bid):
+        # In scope, or a genuine orphan (not anywhere in Batch Plan).
+        return bid in scoped_ids or bid not in all_bp_ids
+
+    def _centre(bid):
+        return bp_map.get(bid) or '(not in Batch Plan)'
+
+    # ── ACTUAL ────────────────────────────────────────────────────────────────
+    actual_rows = {}
+    for r in SourcingComplete.objects.all():
+        if not _include(r.batch_id):
+            continue
+        row = actual_rows.setdefault(r.batch_id, {
+            'centre': _centre(r.batch_id), 'batch_id': r.batch_id, 'total': 0,
+            'sources': {s: 0 for s in source_cols}, 'drill': {},
+        })
+        src = r.community_source if r.community_source in row['sources'] else None
+        if src is None:
+            # Unknown source label — bucket under its own name so it's visible
+            row['sources'].setdefault(r.community_source, 0)
+            if r.community_source not in source_cols:
+                source_cols.append(r.community_source)
+            src = r.community_source
+        row['sources'][src] += r.candidate_count
+        row['total'] += r.candidate_count
+        cat_map = row['drill'].setdefault(src, {})
+        cat = cat_map.setdefault(r.community_category or '(uncategorised)',
+                                 {'count': 0, 'details': []})
+        cat['count'] += r.candidate_count
+        cat['details'].append({
+            'channel': r.channel_name, 'spoc': r.spoc_name,
+            'contact': r.spoc_contact, 'location': r.location,
+            'count': r.candidate_count, 'remarks': r.remarks,
+        })
+
+    # ── TARGET ────────────────────────────────────────────────────────────────
+    target_rows = {}
+    for r in SourcingTarget.objects.all():
+        if not _include(r.batch_id):
+            continue
+        row = target_rows.setdefault(r.batch_id, {
+            'centre': _centre(r.batch_id), 'batch_id': r.batch_id, 'total': 0,
+            'sources': {s: 0 for s in source_cols}, 'drill': {},
+        })
+        src = r.community_source or '(unmapped)'
+        if src not in row['sources']:
+            row['sources'][src] = 0
+            if src not in source_cols:
+                source_cols.append(src)
+        val = r.target_count
+        val = int(val) if float(val).is_integer() else round(val, 1)
+        row['sources'][src] += val
+        row['total'] += val
+        cat_map = row['drill'].setdefault(src, {})
+        cat_map[r.community_category] = cat_map.get(r.community_category, 0) + val
+
+    def _round(rows):
+        out = sorted(rows.values(), key=lambda x: (x['centre'], x['batch_id']))
+        for row in out:
+            row['total'] = int(row['total']) if float(row['total']).is_integer() else round(row['total'], 1)
+            for s, v in row['sources'].items():
+                row['sources'][s] = int(v) if float(v).is_integer() else round(v, 1)
+        return out
+
+    return source_cols, _round(actual_rows), _round(target_rows)
+
+
 def index(request):
     available_fys = get_available_fys()
     fy = request.GET.get('fy', available_fys[0] if available_fys else '2026-27')
@@ -2830,6 +2922,7 @@ def index(request):
     centre_id_filter   = request.GET.get('centre', '')
     cluster_filter     = request.GET.get('cluster', '')
     sub_cluster_filter = request.GET.get('sub_cluster', '')
+    projects_fy_filter = request.GET.get('projects_fy', '')
 
     # ── Base scope: always restrict to cluster / sub_cluster first ────────────
     scoped_centres_qs = Centre.objects.all()
@@ -2865,7 +2958,18 @@ def index(request):
     # date falls within the FY window. Prevents stale projects (e.g. a
     # Feb-Mar 2026 batch) from appearing when FY 2026-27 is selected.
     bp_for_proj    = BatchPlan.objects.filter(centre_id__in=filtered_centre_ids)
+    if projects_fy_filter:
+        bp_for_proj = bp_for_proj.filter(projects_fy=projects_fy_filter)
     bp_for_proj_fy = filter_batchplan_by_fy(bp_for_proj, fy)
+
+    # Projects_FY dropdown — distinct values from Batch Plan within centre scope
+    projects_fy_options = sorted(set(
+        BatchPlan.objects.filter(centre_id__in=filtered_centre_ids)
+        .exclude(projects_fy='').values_list('projects_fy', flat=True)
+    ))
+    if projects_fy_filter and projects_fy_filter not in projects_fy_options:
+        projects_fy_options = sorted(projects_fy_options + [projects_fy_filter])
+
     projects = sorted(set(bp_for_proj_fy.exclude(project_name='').values_list('project_name', flat=True)))
     # If the user navigated with an explicit ?project=… that isn't in this FY
     # (e.g. switched FY but kept the URL), still show it in the dropdown so it
@@ -2894,6 +2998,8 @@ def index(request):
 
     # Filter batches
     batches = BatchPlan.objects.filter(centre_id__in=filtered_centre_ids)
+    if projects_fy_filter:
+        batches = batches.filter(projects_fy=projects_fy_filter)
     if project_name:
         batches = batches.filter(project_name=project_name)
     if centre_id_filter:
@@ -2901,13 +3007,21 @@ def index(request):
 
     mom_months = build_mom_rows(batches, fy)
 
+    # Cards: targets stay date-bucketed (from MoM); actuals use the curated
+    # FY-total act columns directly, because Batch_Plan_New.xlsx (Jul-2026
+    # refresh) carries no actual-date columns — date-bucketing would show 0.
+    # The MoM charts stay date-based and will populate if/when actual dates
+    # return to the source file.
+    from django.db.models import Sum
+    act_totals = batches.aggregate(
+        e=Sum('fy_e_act'), c=Sum('fy_c_act'), p=Sum('fy_p_act'))
     total_row = {
         'enrol_target': sum(m['enrol_target'] for m in mom_months),
-        'enrol_actual': sum(m['enrol_actual'] for m in mom_months),
+        'enrol_actual': act_totals['e'] or 0,
         'cert_target': sum(m['cert_target'] for m in mom_months),
-        'cert_actual': sum(m['cert_actual'] for m in mom_months),
+        'cert_actual': act_totals['c'] or 0,
         'place_target': sum(m['place_target'] for m in mom_months),
-        'place_actual': sum(m['place_actual'] for m in mom_months),
+        'place_actual': act_totals['p'] or 0,
     }
 
     centre_summary = []
@@ -2922,11 +3036,13 @@ def index(request):
         cb = batches.filter(centre_id=c.centre_id)
         rows = build_mom_rows(cb, fy)
         et = sum(r['enrol_target'] for r in rows)
-        ea = sum(r['enrol_actual'] for r in rows)
         ct = sum(r['cert_target'] for r in rows)
-        ca = sum(r['cert_actual'] for r in rows)
         pt = sum(r['place_target'] for r in rows)
-        pa = sum(r['place_actual'] for r in rows)
+        # Actuals: FY-total act columns (see cards note above)
+        c_act = cb.aggregate(e=Sum('fy_e_act'), c=Sum('fy_c_act'), p=Sum('fy_p_act'))
+        ea = c_act['e'] or 0
+        ca = c_act['c'] or 0
+        pa = c_act['p'] or 0
         centre_summary.append({
             'centre_id': c.centre_id,
             'centre_name': c.centre_name,
@@ -3045,10 +3161,19 @@ def index(request):
 
     active_tab = request.GET.get('tab', 'employability')
 
+    # ── Actual & Target Sourcing Summary tables (Batch-ID keyed) ─────────────
+    sourcing_source_cols, sourcing_actual_rows, sourcing_target_rows = \
+        build_batch_sourcing_tables(batches)
+
     return render(request, 'dashboard/index.html', {
         'active_tab': active_tab,
         'fy': fy,
         'available_fys': available_fys,
+        'projects_fy_options': projects_fy_options,
+        'projects_fy_filter': projects_fy_filter,
+        'sourcing_source_cols': json.dumps(sourcing_source_cols),
+        'sourcing_actual_rows': json.dumps(sourcing_actual_rows),
+        'sourcing_target_rows': json.dumps(sourcing_target_rows),
         'cluster_filter':     cluster_filter,
         'sub_cluster_filter': sub_cluster_filter,
         'bu_heads': bu_heads,
@@ -3271,16 +3396,16 @@ def _agg_rows(rows):
         fc = r['final_certification_planned'] or 0
         fp = r['final_placement_planned'] or 0
         a['final_e'] += fe; a['final_c'] += fc; a['final_p'] += fp
-        # NAPS / NATS aligned — full-year targets (enrolment-based)
-        if r['naps_qp']: a['final_naps'] += fe
-        if r['nats_qp']: a['final_nats'] += fe
+        # NAPS / NATS aligned — full-year targets (certification-based)
+        if r['naps_qp']: a['final_naps'] += fc
+        if r['nats_qp']: a['final_nats'] += fc
         # YTD planned
         if r['ytd_e']: a['ytd_e_plan'] += fe
         if r['ytd_c']: a['ytd_c_plan'] += fc
         if r['ytd_p']: a['ytd_p_plan'] += fp
-        # YTD NAPS / NATS aligned targets
-        if r['ytd_e'] and r['naps_qp']: a['ytd_naps_plan'] += fe
-        if r['ytd_e'] and r['nats_qp']: a['ytd_nats_plan'] += fe
+        # YTD NAPS / NATS aligned targets (certification-based, gated by cert YTD)
+        if r['ytd_c'] and r['naps_qp']: a['ytd_naps_plan'] += fc
+        if r['ytd_c'] and r['nats_qp']: a['ytd_nats_plan'] += fc
         # Actuals
         ca = r['fy_c_act'] or 0
         a['fy_e_act'] += r['fy_e_act'] or 0

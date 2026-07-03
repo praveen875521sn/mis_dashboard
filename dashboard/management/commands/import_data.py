@@ -237,11 +237,14 @@ class Command(BaseCommand):
 
         # Also ensure all centre IDs from Batch_Plan_New and Manpower exist
         bp_raw = pd.read_excel(f'{data_dir}/Batch_Plan_New.xlsx')
+        # Normalise headers: the source file has stray leading/trailing spaces
+        # (e.g. ' FY 26-27 E Act', ' FY 26-27 E Target') which break exact-name lookups.
+        bp_raw.columns = bp_raw.columns.str.strip()
         mm_raw = pd.read_excel(f'{data_dir}/Manpower_Master_1.xlsx')
 
         all_centre_ids = set()
         for df, id_col, name_col in [
-            (bp_raw, 'Centre ID', 'Centre Name'),
+            (bp_raw, 'Centre ID', 'Center'),
             (mm_raw, 'Centre ID', 'Center as per sahi'),
         ]:
             for _, row in df.iterrows():
@@ -278,10 +281,10 @@ class Command(BaseCommand):
                 batch_id=bid,
                 defaults={
                     'centre': centre,
-                    'centre_name':         safe_str(row['Centre Name']),
+                    'centre_name':         safe_str(col(row, 'Center', 'Centre Name', 'Center Name')),
                     'qp':                  safe_str(col(row, 'QP Name', 'QP')),
                     'project_name':        safe_str(col(row, 'Project Name(SAHI)', 'Project Name')),
-                    'sub_project_name':    safe_str(col(row, 'Sub Project name ', 'Sub Project name')),
+                    'sub_project_name':    safe_str(col(row, 'Sub Project name', 'Sub Project Name')),
                     'projects_fy':         safe_str(col(row, 'Projects_FY')),
 
                     # Planned dates
@@ -294,10 +297,10 @@ class Command(BaseCommand):
                     'assessment_actual_certification_date': safe_date(col(row, 'Assessment Actual Certification Date')),
                     'placed_date':                          safe_date(col(row, 'Placed Date')),
 
-                    # Targets
-                    'final_enrolment_planned':     safe_int(col(row, '   Final Enrolment Planned',    'Final Enrolment Planned')),
-                    'final_certification_planned': safe_int(col(row, '   Final Certification Planned','Final Certification Planned')),
-                    'final_placement_planned':     safe_int(col(row, '   Final Placement Planned',   'Final Placement Planned')),
+                    # Targets (new format: 'FY 26-27 E/C/P Target'; old: 'Final ... Planned')
+                    'final_enrolment_planned':     safe_int(col(row, 'FY 26-27 E Target', 'Final Enrolment Planned')),
+                    'final_certification_planned': safe_int(col(row, 'FY 26-27 C Target', 'Final Certification Planned')),
+                    'final_placement_planned':     safe_int(col(row, 'FY 26-27 P Target', 'Final Placement Planned')),
 
                     # FY 26-27 actuals (Q1A: trusted source)
                     'on_going': safe_int(col(row, 'On Going')),
@@ -309,6 +312,12 @@ class Command(BaseCommand):
 
                     # Entity (SF / LLF)
                     'entity':   safe_str(col(row, 'Entity')),
+
+                    # New-format columns (Jul-2026 refresh)
+                    'skilling_type': safe_str(col(row, 'Skilling Type')),
+                    'qp_code':       safe_str(col(row, 'QP Code')),
+                    'naps_aligned':  safe_str(col(row, 'NAPS Aligned')),
+                    'nats_aligned':  safe_str(col(row, 'NATS Aligned')),
                 }
             )
             created += 1

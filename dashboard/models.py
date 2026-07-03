@@ -70,6 +70,12 @@ class BatchPlan(models.Model):
     # Entity (SF / LLF)
     entity          = models.CharField(max_length=20, blank=True, default='')
 
+    # New-format columns (Batch_Plan_New.xlsx, Jul-2026 refresh)
+    skilling_type   = models.CharField(max_length=100, blank=True, default='')   # Skilling Type
+    qp_code         = models.CharField(max_length=100, blank=True, default='')   # QP Code
+    naps_aligned    = models.CharField(max_length=10,  blank=True, default='')   # NAPS Aligned (Yes/No)
+    nats_aligned    = models.CharField(max_length=10,  blank=True, default='')   # NATS Aligned (Yes/No)
+
     # Actuals (Q1A: trust these columns as the source of truth)
     on_going        = models.IntegerField(default=0)   # On Going flag/count
     fy_e_act        = models.IntegerField(default=0)   # FY 26-27 E Act
@@ -512,6 +518,43 @@ class SourcingActual(models.Model):
 
     def __str__(self):
         return f"{self.centre_name} · {self.community_source} / {self.community_category}"
+
+
+class SourcingComplete(models.Model):
+    """Actual candidate sourcing per batch — one row per Batch × Channel.
+    Source: Candidate_Sourcing_Channels_Complete.xlsx.
+    Joined to BatchPlan via batch_id ('Batch ID (Complete)' ↔ BatchPlan.batch_id)."""
+    batch_id           = models.CharField(max_length=100, db_index=True)   # Batch ID (Complete)
+    candidate_count    = models.IntegerField(default=0)
+    community_source   = models.CharField(max_length=255, blank=True, db_index=True)  # Sourcing Channels Type (mapped via master)
+    community_category = models.CharField(max_length=255, blank=True, db_index=True)  # Sourcing Channels Details
+    channel_name       = models.CharField(max_length=255, blank=True)      # Sourcing Channels Name
+    spoc_name          = models.CharField(max_length=255, blank=True)
+    spoc_contact       = models.CharField(max_length=50,  blank=True)
+    location           = models.CharField(max_length=255, blank=True)
+    remarks            = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['batch_id', 'community_source'])]
+
+    def __str__(self):
+        return f"{self.batch_id} · {self.community_source}/{self.community_category} × {self.candidate_count}"
+
+
+class SourcingTarget(models.Model):
+    """Target candidate sourcing per batch — one row per Batch × Category.
+    Source: Candidate_Sourcing_Channels_Target.xlsx (wide format, melted on import).
+    Community Source is resolved from SourcingChannelMaster."""
+    batch_id           = models.CharField(max_length=100, db_index=True)
+    community_source   = models.CharField(max_length=255, blank=True, db_index=True)
+    community_category = models.CharField(max_length=255, blank=True, db_index=True)
+    target_count       = models.FloatField(default=0)
+
+    class Meta:
+        indexes = [models.Index(fields=['batch_id', 'community_source'])]
+
+    def __str__(self):
+        return f"{self.batch_id} · {self.community_source}/{self.community_category} → {self.target_count}"
 
 
 # ── Trainer Productivity (NEW — replaces Trainer_Target) ────────────────────

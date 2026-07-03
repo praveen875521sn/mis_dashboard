@@ -10,12 +10,11 @@ Usage:
 """
 
 import os
-from datetime import date, datetime, time, timedelta
 
 import openpyxl
 from django.core.management.base import BaseCommand
 
-from dashboard.models import MobiliserTarget, TrainerTarget, TrainerTargetDay
+from dashboard.models import MobiliserTarget
 
 
 def _s(v):
@@ -29,34 +28,6 @@ def _i(v):
         return int(float(v))
     except (TypeError, ValueError):
         return 0
-
-
-def _f(v):
-    """Coerce a cell value to a float. Handles:
-       - numbers (int, float)
-       - datetime.time / datetime.timedelta (rendered as decimal hours)
-       - blank / None / NaN
-    Returns 0.0 if it can't be coerced. The datetime.time case is critical
-    for Trainer_Target.xlsx where Excel stores cells as time-of-day values
-    like 3:00, 2:55, etc. — these must read as 3.0 hours, 2.917 hours.
-    """
-    if v is None or v == '':
-        return 0.0
-    # datetime.time: e.g. time(3, 0) → 3.0  ;  time(2, 55) → 2.9167
-    if isinstance(v, time):
-        return v.hour + (v.minute / 60.0) + (v.second / 3600.0)
-    # datetime.timedelta: total seconds → hours
-    if isinstance(v, timedelta):
-        return v.total_seconds() / 3600.0
-    # datetime.datetime: hour-of-day → decimal hours (uncommon, but safe)
-    if isinstance(v, datetime):
-        return v.hour + (v.minute / 60.0) + (v.second / 3600.0)
-    try:
-        if isinstance(v, float) and (v != v):  # NaN
-            return 0.0
-        return float(v)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _normalize(name):
@@ -103,8 +74,7 @@ class Command(BaseCommand):
         # NOTE: Trainer_Target.xlsx is no longer loaded here.
         # Trainer-level data now comes from Trainer_productivity_present.xlsx
         # and Trainer_productivity_duration.xlsx via the
-        # `import_productivity_supply` command. The TrainerTarget / TrainerTargetDay
-        # models are kept for migration history but are no longer populated.
+        # `import_productivity_supply` command.
 
         self.stdout.write(self.style.SUCCESS('Target data import complete.'))
 
@@ -178,77 +148,3 @@ class Command(BaseCommand):
         self.stdout.write(f'  ✓ {created} MobiliserTarget rows '
                           f'(month label: "{e_target_label}").')
 
-    # ── Trainer ──────────────────────────────────────────────────────────────
-    def _import_trainer(self, path):
-        self.stdout.write(f'Importing Trainer Target from {path} ...')
-        wb = openpyxl.load_workbook(path, data_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows:
-            self.stdout.write('  Empty file — skipping.'); return
-
-        headers = rows[0]
-        ix = {
-            'batch':       _idx(headers, 'Batch ID'),
-            'center':      _idx(headers, 'SAHI Center Name', 'Center Name'),
-            'centre_id':   _idx(headers, 'Centre ID', 'Center ID'),
-            'project':     _idx(headers, 'Project Name(SAHI)', 'Project Name (SAHI)'),
-            'sub_proj':    _idx(headers, 'Sub Project name', 'Sub Project Name'),
-            'sub_proj_id': _idx(headers, 'Sub Project ID 1'),
-            'trainer':     _idx(headers, 'Trainer'),
-            'trainer_id':  _idx(headers, 'Trainer ID'),
-        }
-
-        # Day columns = any header that's a date/datetime
-        day_cols = []
-        for i, h in enumerate(headers):
-            if isinstance(h, datetime):
-                day_cols.append((i, h.date()))
-            elif isinstance(h, date):
-                day_cols.append((i, h))
-
-        self.stdout.write(f'  Header map: trainer_id@{ix["trainer_id"]}, '
-                          f'trainer@{ix["trainer"]}, batch@{ix["batch"]}, '
-                          f'center@{ix["center"]}, day_cols={len(day_cols)}')
-
-        def get(row, key):
-            i = ix.get(key)
-            return row[i] if (i is not None and i < len(row)) else None
-
-        TrainerTarget.objects.all().delete()  # cascade kills days too
-        created = 0
-        day_created = 0
-        skipped = 0
-        for row in rows[1:]:
-            if not any(row):
-                continue
-            tid = _i(get(row, 'trainer_id'))
-            if not tid:
-                skipped += 1
-                continue
-
-            tt = TrainerTarget.objects.create(
-                batch_id          = _s(get(row, 'batch')),
-                sahi_center_name  = _s(get(row, 'center')),
-                project_name_sahi = _s(get(row, 'project')),
-                sub_project_name  = _s(get(row, 'sub_proj')),
-                sub_project_id_1  = _s(get(row, 'sub_proj_id')),
-                trainer_name      = _s(get(row, 'trainer')),
-                trainer_id        = tid,
-            )
-            created += 1
-
-            day_batch = []
-            for col_idx, d in day_cols:
-                hours = _f(row[col_idx]) if col_idx < len(row) else 0.0
-                day_batch.append(TrainerTargetDay(
-                    trainer_target=tt, date=d, hours=hours
-                ))
-            if day_batch:
-                TrainerTargetDay.objects.bulk_create(day_batch)
-                day_created += len(day_batch)
-
-        msg = f'  ✓ {created} TrainerTarget rows, {day_created} day-hour entries.'
-        if skipped:
-            msg += f' ({skipped} rows skipped — no Trainer ID)'
-        self.stdout.write(msg)
